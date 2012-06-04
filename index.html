@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Jasmine Spec Runner</title>
+
+  <link rel="shortcut icon" type="image/png" href="vendor/jasmine-1.2.0/jasmine_favicon.png">
+  <link rel="stylesheet" type="text/css" href="vendor/jasmine-1.2.0/jasmine.css">
+  <script type="text/javascript" src="vendor/jasmine-1.2.0/jasmine.js"></script>
+  <script type="text/javascript" src="vendor/jasmine-1.2.0/jasmine-html.js"></script>
+
+  <script type="text/javascript" src="vendor/require.js"></script>
+
+  <script type="text/javascript">
+    require.config({
+      baseUrl: 'lib',
+      paths: {
+        'jquery': '../vendor/jquery-1.7.2.min'
+      },
+      priority: ['jquery']
+    });
+  </script>
+
+  <script type="text/javascript" src="specs/test_spec.js"></script>
+
+  <script type="text/javascript">
+    
+    require(['jquery'], function($) {
+    
+      $(function() {
+        var jasmineEnv = jasmine.getEnv();
+        jasmineEnv.updateInterval = 1000;
+
+        var htmlReporter = new jasmine.HtmlReporter();
+
+        jasmineEnv.addReporter(htmlReporter);
+
+        jasmineEnv.specFilter = function(spec) {
+          return htmlReporter.specFilter(spec);
+        };
+
+        jasmineEnv.execute();
+      });
+        
+    });
+
+  </script>
+
+</head>
+
+<body>
+</body>
+</html>
