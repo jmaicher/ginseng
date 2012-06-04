@@ -8,23 +8,40 @@
   <script type="text/javascript" src="vendor/jasmine-1.2.0/jasmine.js"></script>
   <script type="text/javascript" src="vendor/jasmine-1.2.0/jasmine-html.js"></script>
 
-  <script type="text/javascript" src="vendor/require.js"></script>
+  <script type="text/javascript" src="vendor/require-2.0.0.js"></script>
 
   <script type="text/javascript">
     require.config({
       baseUrl: 'lib',
       paths: {
-        'jquery': '../vendor/jquery-1.7.2.min'
+        'jquery': '../vendor/jquery-1.7.2.min',
+        'backbone': '../vendor/backbone-0.9.2',
+        'underscore': '../vendor/underscore-1.3.1',
+        'custom_matchers': '../specs/support/custom_matchers'
       },
       priority: ['jquery']
     });
   </script>
 
-  <script type="text/javascript" src="specs/test_spec.js"></script>
+  <!-- specs -->
+  <script type="text/javascript" src="specs/ginseng/helpers/inheritance_spec.js"></script>
+  <script type="text/javascript" src="specs/ginseng/mixins/extendable_spec.js"></script>
+  <script type="text/javascript" src="specs/ginseng/mixins/mixable_spec.js"></script>
+
+  <script type="text/javascript" src="specs/ginseng/model_spec.js"></script>
+  <script type="text/javascript" src="specs/ginseng/collection_spec.js"></script>
+  <script type="text/javascript" src="specs/ginseng/view_spec.js"></script>
+  <script type="text/javascript" src="specs/ginseng/router_spec.js"></script>
+
+  <script type="text/javascript" src="specs/ginseng/modular_base_spec.js"></script>
+  <script type="text/javascript" src="specs/ginseng/core_spec.js"></script>
+  <script type="text/javascript" src="specs/ginseng/module_spec.js"></script>
+  <script type="text/javascript" src="specs/ginseng/module_router_spec.js"></script>
+
 
   <script type="text/javascript">
     
-    require(['jquery'], function($) {
+    require(['jquery', 'custom_matchers'], function($, CustomMatchers) {
     
       $(function() {
         var jasmineEnv = jasmine.getEnv();
@@ -37,6 +54,11 @@
         jasmineEnv.specFilter = function(spec) {
           return htmlReporter.specFilter(spec);
         };
+
+        // add custom matchers to jasmine
+        beforeEach(function() {
+          this.addMatchers(CustomMatchers);
+        });
 
         jasmineEnv.execute();
       });
