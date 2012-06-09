@@ -23,6 +23,18 @@ task :jshint do
   puts "jshint passed without errors!\n\n"
 end
 
+task :doc do
+  which "jsdoc" or fail "jsdoc could not be found on your $PATH"
+
+  src_dir = "lib/"
+  target_dir = "doc/"
+
+  puts "Creating documentation from #{src_dir} ...\n\n"
+  sh "jsdoc -d #{target_dir} -r #{src_dir}"
+
+  puts "\nDocumentation has been created in #{target_dir}"
+end
+
 
 ####################
 ## Helpers #########
