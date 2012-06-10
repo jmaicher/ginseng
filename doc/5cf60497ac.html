@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Module: ginseng/module</title>
+    
+    <script src="http://shjs.sourceforge.net/sh_main.min.js"> </script>
+    <script src="http://shjs.sourceforge.net/lang/sh_javascript.min.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/node-dark.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+    
+    <h1 class="page-title">Module: ginseng/module</h1>
+    
+    
+
+
+
+<section>
+    
+<header>
+    <h2>
+    ginseng/module
+    </h2>
+    
+</header>  
+
+<article>
+    <div class="container-overview">
+    
+        
+<dt>
+    <h4 class="name" id="module:ginseng/module"><span class="type-signature"></span>new require(ginseng/module)</h4>
+    
+    
+</dt>
+<dd>
+    
+    
+    <div class="description">
+        Creates a module with the given sandbox and options.
+    </div>
+    
+    
+    
+    
+    
+    
+    
+<dl class="details">
+    
+        
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<dt class="tag-source">Source:</dt>
+	<dd class="tag-source"><ul class="dummy"><li>module.js, line 28</li></ul></dd>
+	
+    
+    
+	
+	
+	
+	
+</dl>
+
+    
+    
+    
+    
+    
+    
+    
+    
+</dd>
+
+    
+    
+    
+        
+            <div class="description">A module that provides a module constructor</div>
+        
+        
+        
+<dl class="details">
+    
+        
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<dt class="tag-source">Source:</dt>
+	<dd class="tag-source"><ul class="dummy"><li>module.js, line 1</li></ul></dd>
+	
+    
+    
+	
+	
+	
+	
+</dl>
+
+        
+        
+    
+    </div>
+    
+    
+        <h3 class="subsection-title">Extends</h3>
+        
+        <ul>
+            <li><a href="dca6c58123.html">module:ginseng/modular_base</a></li>
+        </ul>
+    
+    
+    
+    
+    
+        <h3 class="subsection-title">Requires</h3>
+        
+        <ul>
+            <li>module:underscore</li>
+        
+            <li>module:backbone</li>
+        
+            <li><a href="dca6c58123.html">module:ginseng/modular_base</a></li>
+        
+            <li>module:ginseng/module_router</li>
+        </ul>
+    
+    
+    
+        <h3 class="subsection-title">Classes</h3>
+        
+        <dl>
+            <dt><a href="5cf60497ac.html">require(ginseng/module)</a></dt>
+            <dd></dd>
+        </dl>
+    
+    
+    
+    
+    
+    
+    
+        <h3 class="subsection-title">Methods</h3>
+        
+        <dl>
+            
+<dt>
+    <h4 class="name" id="isRoutable"><span class="type-signature"></span>isRoutable</h4>
+    
+    
+</dt>
+<dd>
+    
+    
+    <div class="description">
+        Determines whether the module is routable or not.
+A module is routable when it's parent created it with a baseRoute
+and a baseRouteName.
+    </div>
+    
+    
+    
+    
+    
+    
+    
+<dl class="details">
+    
+        
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<dt class="tag-source">Source:</dt>
+	<dd class="tag-source"><ul class="dummy"><li>module.js, line 88</li></ul></dd>
+	
+    
+    
+	
+	
+	
+	
+</dl>
+
+    
+    
+    
+    
+    
+    
+    <h5>Returns:</h5>
+    
+            
+<div class="param-desc">
+    true when the module is routable, false otherwise
+</div>
+
+
+
+
+<dl>
+	<dt>
+		Type
+	</dt>
+	<dd>
+		
+		<span class="param-type">boolean</span> 
+		
+	</dd>
+</dl>
+
+        
+    
+    
+</dd>
+
+        
+            
+<dt>
+    <h4 class="name" id="moduleFactory"><span class="type-signature"></span>moduleFactory</h4>
+    
+    
+</dt>
+<dd>
+    
+    
+    <div class="description">
+        Returns a new module instance from the given module constructor
+with the given options. It forwards the call to a moduleFactory
+provided by the sandbox.
+    </div>
+    
+    
+    
+    
+    
+        <h5>Parameters:</h5>
+        
+
+<table class="params">
+    <thead>
+	<tr>
+		
+		<th>Name</th>
+		
+		
+		<th>Type</th>
+		
+		
+		<th>Argument</th>
+		
+		
+		
+		
+		<th class="last">Description</th>
+	</tr>
+	</thead>
+	
+	<tbody>
+	
+	
+        <tr>
+            
+                <td class="name"><code>moduleCtor</code></td>
+            
+            
+            <td class="type">
+            
+                        function
+                        
+                    
+            </td>
+            
+            
+                <td class="attributes">
+                
+                    
+                
+                </td>
+            
+            
+            
+            
+            <td class="description last">module constructor function</td>
+        </tr>
+	
+	
+	
+        <tr>
+            
+                <td class="name"><code>moduleOptions</code></td>
+            
+            
+            <td class="type">
+            
+                        object
+                        
+                    
+            </td>
+            
+            
+                <td class="attributes">
+                
+                    &lt;optional><br>
+                
+                    
+                
+                </td>
+            
+            
+            
+            
+            <td class="description last">object hash with module options</td>
+        </tr>
+	
+	
+	</tbody>
+</table>
+    
+    
+    
+<dl class="details">
+    
+        
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<dt class="tag-source">Source:</dt>
+	<dd class="tag-source"><ul class="dummy"><li>module.js, line 74</li></ul></dd>
+	
+    
+    
+	
+	
+	
+	
+</dl>
+
+    
+    
+    
+    
+    
+    
+    <h5>Returns:</h5>
+    
+            
+<div class="param-desc">
+    an instance of the given moduleCtor
+</div>
+
+
+
+
+<dl>
+	<dt>
+		Type
+	</dt>
+	<dd>
+		
+		<span class="param-type">moduleCtor</span> 
+		
+	</dd>
+</dl>
+
+        
+    
+    
+</dd>
+
+        
+            
+<dt>
+    <h4 class="name" id="constructor"><span class="type-signature">&lt;inner> </span>constructor</h4>
+    
+    
+</dt>
+<dd>
+    
+    
+    <div class="description">
+        Constructor function
+    </div>
+    
+    
+    
+    
+    
+        <h5>Parameters:</h5>
+        
+
+<table class="params">
+    <thead>
+	<tr>
+		
+		<th>Name</th>
+		
+		
+		<th>Type</th>
+		
+		
+		<th>Argument</th>
+		
+		
+		
+		
+		<th class="last">Description</th>
+	</tr>
+	</thead>
+	
+	<tbody>
+	
+	
+        <tr>
+            
+                <td class="name"><code>sandbox</code></td>
+            
+            
+            <td class="type">
+            
+                        object
+                        
+                    
+            </td>
+            
+            
+                <td class="attributes">
+                
+                    
+                
+                </td>
+            
+            
+            
+            
+            <td class="description last">sandbox which will be used by the module</td>
+        </tr>
+	
+	
+	
+        <tr>
+            
+                <td class="name"><code>options</code></td>
+            
+            
+            <td class="type">
+            
+                        object
+                        
+                    
+            </td>
+            
+            
+                <td class="attributes">
+                
+                    &lt;optional><br>
+                
+                    
+                
+                </td>
+            
+            
+            
+            
+            <td class="description last">object hash with module options</td>
+        </tr>
+	
+	
+	</tbody>
+</table>
+    
+    
+    
+<dl class="details">
+    
+        
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<dt class="tag-source">Source:</dt>
+	<dd class="tag-source"><ul class="dummy"><li>module.js, line 36</li></ul></dd>
+	
+    
+    
+	
+	
+	
+	
+</dl>
+
+    
+    
+    
+    
+    
+    
+    
+    
+</dd>
+
+        </dl>
+    
+    
+    
+    
+    
+</article>
+
+</section>  
+
+
+
+
+</div>
+
+<nav>
+    <h3>Modules</h3><ul><li><a href="6f6e130fb2.html">ginseng/collection</a></li><li><a href="a569f6a77e.html">ginseng/core</a></li><li><a href="f6bf6b6482.html">ginseng/helpers/inheritance</a></li><li><a href="0b81e88397.html">ginseng/mixins/extendable</a></li><li><a href="05e36fca36.html">ginseng/mixins/mixable</a></li><li><a href="cdbc639784.html">ginseng/model</a></li><li><a href="dca6c58123.html">ginseng/modular_base</a></li><li><a href="5cf60497ac.html">ginseng/module</a></li><li><a href="54ebbc4fff.html">ginseng/router</a></li><li><a href="67dfe134a3.html">ginseng/sandbox</a></li><li><a href="47df60d098.html">ginseng/view</a></li></ul><h3>Classes</h3><ul></ul>
+</nav>
+
+<br clear="both">
+
+<footer>
+    Documentation generated by <a href="https://github.com/micmath/jsdoc">JSDoc 3</a> on Sun Jun 10 2012 12:09:37 GMT+0200 (CEST)
+</footer>
+
+<script> sh_highlightDocument(); </script>
+</body>
+</html>

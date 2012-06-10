@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Module: ginseng/modular_base</title>
+    
+    <script src="http://shjs.sourceforge.net/sh_main.min.js"> </script>
+    <script src="http://shjs.sourceforge.net/lang/sh_javascript.min.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/node-dark.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+    
+    <h1 class="page-title">Module: ginseng/modular_base</h1>
+    
+    
+
+
+
+<section>
+    
+<header>
+    <h2>
+    ginseng/modular_base
+    </h2>
+    
+</header>  
+
+<article>
+    <div class="container-overview">
+    
+        
+<dt>
+    <h4 class="name" id="module:ginseng/modular_base"><span class="type-signature"></span>new require(ginseng/modular_base)</h4>
+    
+    
+</dt>
+<dd>
+    
+    
+    <div class="description">
+        Creates an abstract base for modular components.
+    </div>
+    
+    
+    
+    
+    
+        <h5>Parameters:</h5>
+        
+
+<table class="params">
+    <thead>
+	<tr>
+		
+		<th>Name</th>
+		
+		
+		<th>Type</th>
+		
+		
+		<th>Argument</th>
+		
+		
+		
+		
+		<th class="last">Description</th>
+	</tr>
+	</thead>
+	
+	<tbody>
+	
+	
+        <tr>
+            
+                <td class="name"><code>options</code></td>
+            
+            
+            <td class="type">
+            
+                        object
+                        
+                    
+            </td>
+            
+            
+                <td class="attributes">
+                
+                    &lt;optional><br>
+                
+                    
+                
+                </td>
+            
+            
+            
+            
+            <td class="description last">object hash with modular base options</td>
+        </tr>
+	
+	
+	</tbody>
+</table>
+    
+    
+    
+<dl class="details">
+    
+        
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<dt class="tag-source">Source:</dt>
+	<dd class="tag-source"><ul class="dummy"><li>modular_base.js, line 28</li></ul></dd>
+	
+    
+    
+	
+	
+	
+	
+</dl>
+
+    
+    
+    
+    
+    
+    
+    
+    
+</dd>
+
+    
+    
+    
+        
+            <div class="description">A module that provides an abstract base for modular components.</div>
+        
+        
+        
+<dl class="details">
+    
+        
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<dt class="tag-source">Source:</dt>
+	<dd class="tag-source"><ul class="dummy"><li>modular_base.js, line 1</li></ul></dd>
+	
+    
+    
+	
+	
+	
+	
+</dl>
+
+        
+        
+    
+    </div>
+    
+    
+    
+    
+    
+    
+        <h3 class="subsection-title">Requires</h3>
+        
+        <ul>
+            <li>module:underscore</li>
+        
+            <li>module:backbone</li>
+        
+            <li><a href="0b81e88397.html">module:ginseng/mixins/extendable</a></li>
+        
+            <li><a href="05e36fca36.html">module:ginseng/mixins/mixable</a></li>
+        </ul>
+    
+    
+    
+        <h3 class="subsection-title">Classes</h3>
+        
+        <dl>
+            <dt><a href="dca6c58123.html">require(ginseng/modular_base)</a></dt>
+            <dd></dd>
+        </dl>
+    
+    
+    
+    
+    
+    
+    
+        <h3 class="subsection-title">Methods</h3>
+        
+        <dl>
+            
+<dt>
+    <h4 class="name" id="addModule"><span class="type-signature"></span>addModule</h4>
+    
+    
+</dt>
+<dd>
+    
+    
+    <div class="description">
+        Adds a new module instance from the given module constructor
+with the given options to the instance. If the autoload parameter
+is true the module gets automatically loaded. When the paramter
+is set to false, it must be loaded manually. If autoload is a
+String, it is expected to be a name of an existing route from #router.
+Then, the module will automatically be loaded when #router triggers
+matching route events.
+    </div>
+    
+    
+    
+    
+    
+        <h5>Parameters:</h5>
+        
+
+<table class="params">
+    <thead>
+	<tr>
+		
+		<th>Name</th>
+		
+		
+		<th>Type</th>
+		
+		
+		<th>Argument</th>
+		
+		
+		
+		<th>Default</th>
+		
+		
+		<th class="last">Description</th>
+	</tr>
+	</thead>
+	
+	<tbody>
+	
+	
+        <tr>
+            
+                <td class="name"><code>moduleCtor</code></td>
+            
+            
+            <td class="type">
+            
+                        function
+                        
+                    
+            </td>
+            
+            
+                <td class="attributes">
+                
+                    
+                
+                </td>
+            
+            
+            
+                <td class="default">
+                
+                </td>
+            
+            
+            <td class="description last">module constructor</td>
+        </tr>
+	
+	
+	
+        <tr>
+            
+                <td class="name"><code>moduleOptions</code></td>
+            
+            
+            <td class="type">
+            
+                        object
+                        
+                    
+            </td>
+            
+            
+                <td class="attributes">
+                
+                    
+                
+                </td>
+            
+            
+            
+                <td class="default">
+                
+                </td>
+            
+            
+            <td class="description last">object hash with module options</td>
+        </tr>
+	
+	
+	
+        <tr>
+            
+                <td class="name"><code>autoload</code></td>
+            
+            
+            <td class="type">
+            
+                        boolean/string
+                        
+                    
+            </td>
+            
+            
+                <td class="attributes">
+                
+                    &lt;optional><br>
+                
+                    
+                
+                </td>
+            
+            
+            
+                <td class="default">
+                
+                    true
+                
+                </td>
+            
+            
+            <td class="description last">true, false or route name</td>
+        </tr>
+	
+	
+	</tbody>
+</table>
+    
+    
+    
+<dl class="details">
+    
+        
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<dt class="tag-source">Source:</dt>
+	<dd class="tag-source"><ul class="dummy"><li>modular_base.js, line 156</li></ul></dd>
+	
+    
+    
+	
+	
+	
+	
+</dl>
+
+    
+    
+    
+    
+    
+    
+    
+    
+</dd>
+
+        
+            
+<dt>
+    <h4 class="name" id="getRoutes"><span class="type-signature"></span>getRoutes</h4>
+    
+    
+</dt>
+<dd>
+    
+    
+    <div class="description">
+        Returns an array containing the routes managed by the
+module. If the module is not routable it returns an
+empty array.
+    </div>
+    
+    
+    
+    
+    
+    
+    
+<dl class="details">
+    
+        
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<dt class="tag-source">Source:</dt>
+	<dd class="tag-source"><ul class="dummy"><li>modular_base.js, line 262</li></ul></dd>
+	
+    
+    
+	
+	
+	
+	
+</dl>
+
+    
+    
+    
+    
+    
+    
+    <h5>Returns:</h5>
+    
+            
+<div class="param-desc">
+    routes array
+</div>
+
+
+
+
+<dl>
+	<dt>
+		Type
+	</dt>
+	<dd>
+		
+		<span class="param-type">array</span> 
+		
+	</dd>
+</dl>
+
+        
+    
+    
+</dd>
+
+        
+            
+<dt>
+    <h4 class="name" id="hasRoutes"><span class="type-signature"></span>hasRoutes</h4>
+    
+    
+</dt>
+<dd>
+    
+    
+    <div class="description">
+        Returns true when module has routes and false otherwise
+    </div>
+    
+    
+    
+    
+    
+    
+    
+<dl class="details">
+    
+        
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<dt class="tag-source">Source:</dt>
+	<dd class="tag-source"><ul class="dummy"><li>modular_base.js, line 273</li></ul></dd>
+	
+    
+    
+	
+	
+	
+	
+</dl>
+
+    
+    
+    
+    
+    
+    
+    <h5>Returns:</h5>
+    
+            
+<div class="param-desc">
+    true when module has routes, false otherwise
+</div>
+
+
+
+
+<dl>
+	<dt>
+		Type
+	</dt>
+	<dd>
+		
+		<span class="param-type">boolean</span> 
+		
+	</dd>
+</dl>
+
+        
+    
+    
+</dd>
+
+        
+            
+<dt>
+    <h4 class="name" id="loadModule"><span class="type-signature"></span>loadModule</h4>
+    
+    
+</dt>
+<dd>
+    
+    
+    <div class="description">
+        Load the given module instance
+    </div>
+    
+    
+    
+    
+    
+        <h5>Parameters:</h5>
+        
+
+<table class="params">
+    <thead>
+	<tr>
+		
+		<th>Name</th>
+		
+		
+		<th>Type</th>
+		
+		
+		
+		
+		
+		<th class="last">Description</th>
+	</tr>
+	</thead>
+	
+	<tbody>
+	
+	
+        <tr>
+            
+                <td class="name"><code>moduleInstance</code></td>
+            
+            
+            <td class="type">
+            
+                        ginseng/module
+                        
+                    
+            </td>
+            
+            
+            
+            
+            
+            <td class="description last">module instance to load</td>
+        </tr>
+	
+	
+	</tbody>
+</table>
+    
+    
+    
+<dl class="details">
+    
+        
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<dt class="tag-source">Source:</dt>
+	<dd class="tag-source"><ul class="dummy"><li>modular_base.js, line 236</li></ul></dd>
+	
+    
+    
+	
+	
+	
+	
+</dl>
+
+    
+    
+    
+    
+    
+    
+    
+    
+</dd>
+
+        
+            
+<dt>
+    <h4 class="name" id="moduleFactory"><span class="type-signature"></span>moduleFactory</h4>
+    
+    
+</dt>
+<dd>
+    
+    
+    <div class="description">
+        Dummy function which will be overwritten by core/module
+    </div>
+    
+    
+    
+    
+    
+    
+    
+<dl class="details">
+    
+        
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<dt class="tag-source">Source:</dt>
+	<dd class="tag-source"><ul class="dummy"><li>modular_base.js, line 138</li></ul></dd>
+	
+    
+    
+	
+	
+	
+	
+</dl>
+
+    
+    
+    
+    
+    
+    
+    
+    
+</dd>
+
+        </dl>
+    
+    
+    
+    
+    
+</article>
+
+</section>  
+
+
+
+
+</div>
+
+<nav>
+    <h3>Modules</h3><ul><li><a href="6f6e130fb2.html">ginseng/collection</a></li><li><a href="a569f6a77e.html">ginseng/core</a></li><li><a href="f6bf6b6482.html">ginseng/helpers/inheritance</a></li><li><a href="0b81e88397.html">ginseng/mixins/extendable</a></li><li><a href="05e36fca36.html">ginseng/mixins/mixable</a></li><li><a href="cdbc639784.html">ginseng/model</a></li><li><a href="dca6c58123.html">ginseng/modular_base</a></li><li><a href="5cf60497ac.html">ginseng/module</a></li><li><a href="54ebbc4fff.html">ginseng/router</a></li><li><a href="67dfe134a3.html">ginseng/sandbox</a></li><li><a href="47df60d098.html">ginseng/view</a></li></ul><h3>Classes</h3><ul></ul>
+</nav>
+
+<br clear="both">
+
+<footer>
+    Documentation generated by <a href="https://github.com/micmath/jsdoc">JSDoc 3</a> on Sun Jun 10 2012 12:09:36 GMT+0200 (CEST)
+</footer>
+
+<script> sh_highlightDocument(); </script>
+</body>
+</html>
