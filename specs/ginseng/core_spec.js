@@ -1,10 +1,13 @@
 require([
   'ginseng/core',
   'ginseng/modular_base',
+  'ginseng/sandbox',
   'ginseng/router'  
 ], function(
   Core,
-  ModularBase, Router
+  ModularBase,
+  Sandbox,
+  Router
 ) {
   'use strict';
 
@@ -12,7 +15,7 @@ require([
   
     describe('constructor', function() {
       
-      // see #router and #Sandbox specs
+      // see #router specs
 
     }); // constructor
 
@@ -91,7 +94,7 @@ require([
           var sandbox = {},
               options = {};
 
-          spyOn(subject, 'Sandbox').andReturn(sandbox);
+          spyOn(subject, 'sandboxFactory').andReturn(sandbox);
 
           subject.moduleFactory(moduleCtorSpy, options);
 
@@ -107,6 +110,15 @@ require([
 
       }); // #moduleFactory
 
+     
+     
+      describe('#sandboxFactory', function() {
+
+        xit('creates instance of ginseng/sandbox with core as parameter');
+        xit('returns instance of ginseng/sandbox');
+
+      });
+
     }); // prototype
 
 
@@ -115,55 +127,6 @@ require([
 
       beforeEach(function() {
         subject = new Core();
-      });
-
-      describe('#Sandbox', function() { 
-        var sandbox;
-
-        beforeEach(function() {
-          sandbox = new subject.Sandbox(subject);
-        });
-
-        describe('#constructor', function() {
-          
-          it('assigns given core as instance variable', function() {
-            expect(sandbox.core).toBe(subject);
-          });
-
-        });
-
-        describe('#moduleFactory', function() {
-          var moduleCtor, moduleOptions, module, moduleFactorySpy;
-
-          beforeEach(function() {
-            moduleCtor = function() {};
-            moduleOptions = {};
-            module = {};
-            moduleFactorySpy = spyOn(subject, 'moduleFactory').andReturn(module);
-          });
-
-          it('calls Core.prototype.moduleFactory with the given arguments', function() {
-            sandbox.moduleFactory(moduleCtor, moduleOptions);
-
-            expect(moduleFactorySpy).toHaveBeenCalledWith(moduleCtor, moduleOptions);
-          });
-
-          it('returns the module created by Core.prototype.moduleFactory', function() {
-            var result = sandbox.moduleFactory(moduleCtor, moduleOptions);
-
-            expect(result).toBe(module);
-          });
-
-        }); // #moduleFactory
-        
-        it('is not prototype function', function() {
-          expect(Core.prototype.Sandbox).not.toBeDefined();
-        });
-        
-      }); // Sandbox
-
-      it('has #Sandbox ctor', function() {
-        expect(subject.Sandbox).toBeDefined();
       });
 
       it('has #router', function() {
