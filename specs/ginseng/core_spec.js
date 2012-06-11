@@ -12,20 +12,36 @@ require([
   'use strict';
 
   describe('ginseng/core', function() {
-  
-    describe('constructor', function() {
-      
-      // see #router specs
+    var subject;
 
-    }); // constructor
+    beforeEach(function() {
+      subject = new Core();
+    });
+
+    describe('#constructor', function() {
+
+      it('creates #router', function() {
+        expect(subject.router).toBeDefined();
+      });
+     
+      it('creates empty array #extensions', function() {
+        expect(subject.extensions).toBeArray();
+        expect(subject.extensions.length).toBe(0);
+      });
+
+      it('creates #Sandbox property by extending ginseng/sandbox', function() {
+        var ExtendedSandbox = function() {}, 
+            spy = spyOn(Sandbox, 'extend').andReturn(ExtendedSandbox);
+            
+        subject = new Core();
+
+        expect(subject.Sandbox).toBe(ExtendedSandbox);
+      });
+
+    }); // #constructor
 
 
     describe('prototype', function() {
-      var subject;
-
-      beforeEach(function() {
-        subject = new Core();
-      });
 
       describe('#addModule', function() {
         var protoSpy, moduleCtor, moduleOptions, autoload;
@@ -77,7 +93,8 @@ require([
           expect(result).toBe(module);
         });
 
-      });
+      }); // #addModule
+
 
       describe('#moduleFactory', function() {
         var moduleCtorSpy;
@@ -111,31 +128,65 @@ require([
       }); // #moduleFactory
 
      
-     
       describe('#sandboxFactory', function() {
 
         xit('creates instance of ginseng/sandbox with core as parameter');
         xit('returns instance of ginseng/sandbox');
+
+      }); // #sandboxFactory
+
+
+      describe('#addExtension', function() {
+        var ns, extension, ctorSpy;
+
+        beforeEach(function() {
+          // we use a namespace here to spy on a constructor
+          ns = {
+            Extension: function() {}
+          };
+          
+          extension = {};
+
+          ctorSpy = spyOn(ns, 'Extension').andReturn(extension);
+        });
+
+        
+        describe('when given extension has #Sandbox property', function() {
+          
+          beforeEach(function() {
+            // extension has #Sandbox property
+            extension.Sandbox = {}
+          });
+
+          it('mixes the #Sandbox property into its own #Sandbox prototype', function() {
+            var spy = spyOn(subject.Sandbox.prototype, 'mixin');
+
+            subject.addExtension(ns.Extension);
+
+            expect(spy).toHaveBeenCalledWith(extension.Sandbox);
+          });
+        
+        });
+        
+
+        it('creates an instance of the given extension ctor with this as argument', function() {
+          subject.addExtension(ns.Extension);
+
+          expect(ctorSpy).toHaveBeenCalledWith(subject);
+        }); 
+
+
+        it('adds created instance to #extensions', function() {
+          subject.addExtension(ns.Extension);
+
+          expect(subject.extensions.pop()).toBe(extension);
+        });
 
       });
 
     }); // prototype
 
 
-    describe('instance', function() {
-      var subject;
-
-      beforeEach(function() {
-        subject = new Core();
-      });
-
-      it('has #router', function() {
-        expect(subject.router).toBeDefined();
-      });
-
-    }); // instance
- 
-  
     it('extends core/modular_base', function() {
       expect(new Core() instanceof ModularBase).toBe(true);
     });
