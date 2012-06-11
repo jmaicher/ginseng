@@ -2,6 +2,7 @@ require([
   'ginseng',
   'underscore',
   'ginseng/core',
+  'ginseng/extension',
   'ginseng/module',
   'ginseng/model',
   'ginseng/view',
@@ -10,6 +11,7 @@ require([
   Ginseng,
   Underscore,
   Core,
+  Extension,
   Module,
   Model,
   View,
@@ -24,6 +26,10 @@ require([
 
     it('exposes ginseng/core under #Core', function() {
       expect(Ginseng.Core).toBe(Core);
+    });
+
+    it('exposes ginseng/extension under #Extension', function() {
+      expect(Ginseng.Extension).toBe(Extension);
     });
 
     it('exposes ginseng/module under #Module', function() {
