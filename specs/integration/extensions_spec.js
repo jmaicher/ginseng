@@ -4,7 +4,7 @@ require(['ginseng'], function(Ginseng) {
   describe('core extensions', function() {
 
     var Core, Extension, Module,
-        core, module;
+        core;
  
     Extension = Ginseng.Extension.extend({
     
