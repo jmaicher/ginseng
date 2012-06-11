@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>JSDoc: Module: ginseng/model</title>
+    <title>JSDoc: Module: ginseng/extension</title>
     
     <script src="http://shjs.sourceforge.net/sh_main.min.js"> </script>
     <script src="http://shjs.sourceforge.net/lang/sh_javascript.min.js"> </script>
@@ -17,7 +17,7 @@
 
 <div id="main">
     
-    <h1 class="page-title">Module: ginseng/model</h1>
+    <h1 class="page-title">Module: ginseng/extension</h1>
     
     
 
@@ -27,7 +27,7 @@
     
 <header>
     <h2>
-    ginseng/model
+    ginseng/extension
     </h2>
     
 </header>  
@@ -37,7 +37,7 @@
     
         
 <dt>
-    <h4 class="name" id="module:ginseng/model"><span class="type-signature"></span>new require(ginseng/model)</h4>
+    <h4 class="name" id="module:ginseng/extension"><span class="type-signature"></span>new require(ginseng/extension)</h4>
     
     
 </dt>
@@ -45,8 +45,7 @@
     
     
     <div class="description">
-        Creates a model with given attributes and options.
-This constructor extends Backbone.Model.
+        Core extension constructor
     </div>
     
     
@@ -66,8 +65,6 @@ This constructor extends Backbone.Model.
 		<th>Type</th>
 		
 		
-		<th>Argument</th>
-		
 		
 		
 		
@@ -80,58 +77,21 @@ This constructor extends Backbone.Model.
 	
         <tr>
             
-                <td class="name"><code>attributes</code></td>
+                <td class="name"><code>core</code></td>
             
             
             <td class="type">
             
-                        object
+                        ginseng/core
                         
                     
             </td>
             
             
-                <td class="attributes">
-                
-                    &lt;optional><br>
-                
-                    
-                
-                </td>
             
             
             
-            
-            <td class="description last">object hash with model attributes</td>
-        </tr>
-	
-	
-	
-        <tr>
-            
-                <td class="name"><code>options</code></td>
-            
-            
-            <td class="type">
-            
-                        object
-                        
-                    
-            </td>
-            
-            
-                <td class="attributes">
-                
-                    &lt;optional><br>
-                
-                    
-                
-                </td>
-            
-            
-            
-            
-            <td class="description last">object hash with model options</td>
+            <td class="description last">core to extend</td>
         </tr>
 	
 	
@@ -159,7 +119,7 @@ This constructor extends Backbone.Model.
 	
 	
 	<dt class="tag-source">Source:</dt>
-	<dd class="tag-source"><ul class="dummy"><li>model.js, line 19</li></ul></dd>
+	<dd class="tag-source"><ul class="dummy"><li>extension.js, line 24</li></ul></dd>
 	
     
     
@@ -183,7 +143,7 @@ This constructor extends Backbone.Model.
     
     
         
-            <div class="description">A module that provides a Model constructor.</div>
+            <div class="description">A module that provides a core extension constructor</div>
         
         
         
@@ -206,7 +166,7 @@ This constructor extends Backbone.Model.
 	
 	
 	<dt class="tag-source">Source:</dt>
-	<dd class="tag-source"><ul class="dummy"><li>model.js, line 1</li></ul></dd>
+	<dd class="tag-source"><ul class="dummy"><li>extension.js, line 1</li></ul></dd>
 	
     
     
@@ -229,7 +189,7 @@ This constructor extends Backbone.Model.
         <h3 class="subsection-title">Requires</h3>
         
         <ul>
-            <li>module:backbone</li>
+            <li><a href="0b81e88397.html">module:ginseng/mixins/extendable</a></li>
         </ul>
     
     
@@ -237,7 +197,7 @@ This constructor extends Backbone.Model.
         <h3 class="subsection-title">Classes</h3>
         
         <dl>
-            <dt><a href="cdbc639784.html">require(ginseng/model)</a></dt>
+            <dt><a href="7177bbcc09.html">require(ginseng/extension)</a></dt>
             <dd></dd>
         </dl>
     
@@ -246,6 +206,70 @@ This constructor extends Backbone.Model.
     
     
     
+    
+        <h3 class="subsection-title">Methods</h3>
+        
+        <dl>
+            
+<dt>
+    <h4 class="name" id="initialize"><span class="type-signature">&lt;inner> </span>initialize</h4>
+    
+    
+</dt>
+<dd>
+    
+    
+    <div class="description">
+        Placeholder function which should be overwritten
+by concrete extension.
+    </div>
+    
+    
+    
+    
+    
+    
+    
+<dl class="details">
+    
+        
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	<dt class="tag-source">Source:</dt>
+	<dd class="tag-source"><ul class="dummy"><li>extension.js, line 38</li></ul></dd>
+	
+    
+    
+	
+	
+	
+	
+</dl>
+
+    
+    
+    
+    
+    
+    
+    
+    
+</dd>
+
+        </dl>
     
     
     
