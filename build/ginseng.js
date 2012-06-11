@@ -1,8 +1,320 @@
+(function(global) {
 /**
  * almond 0.1.1 Copyright (c) 2011, The Dojo Foundation All Rights Reserved.
  * Available via the MIT or new BSD license.
  * see: http://github.com/jrburke/almond for details
  */
+//Going sloppy to avoid 'use strict' string cost, but strict practices should
+//be followed.
+/*jslint sloppy: true */
+/*global setTimeout: false */
+
+var requirejs, require, define;
+(function (undef) {
+    var defined = {},
+        waiting = {},
+        config = {},
+        defining = {},
+        aps = [].slice,
+        main, req;
+
+    /**
+     * Given a relative module name, like ./something, normalize it to
+     * a real name that can be mapped to a path.
+     * @param {String} name the relative name
+     * @param {String} baseName a real name that the name arg is relative
+     * to.
+     * @returns {String} normalized name
+     */
+    function normalize(name, baseName) {
+        var baseParts = baseName && baseName.split("/"),
+            map = config.map,
+            starMap = (map && map['*']) || {},
+            nameParts, nameSegment, mapValue, foundMap, i, j, part;
+
+        //Adjust any relative paths.
+        if (name && name.charAt(0) === ".") {
+            //If have a base name, try to normalize against it,
+            //otherwise, assume it is a top-level require that will
+            //be relative to baseUrl in the end.
+            if (baseName) {
+                //Convert baseName to array, and lop off the last part,
+                //so that . matches that "directory" and not name of the baseName's
+                //module. For instance, baseName of "one/two/three", maps to
+                //"one/two/three.js", but we want the directory, "one/two" for
+                //this normalization.
+                baseParts = baseParts.slice(0, baseParts.length - 1);
+
+                name = baseParts.concat(name.split("/"));
+
+                //start trimDots
+                for (i = 0; (part = name[i]); i++) {
+                    if (part === ".") {
+                        name.splice(i, 1);
+                        i -= 1;
+                    } else if (part === "..") {
+                        if (i === 1 && (name[2] === '..' || name[0] === '..')) {
+                            //End of the line. Keep at least one non-dot
+                            //path segment at the front so it can be mapped
+                            //correctly to disk. Otherwise, there is likely
+                            //no path mapping for a path starting with '..'.
+                            //This can still fail, but catches the most reasonable
+                            //uses of ..
+                            return true;
+                        } else if (i > 0) {
+                            name.splice(i - 1, 2);
+                            i -= 2;
+                        }
+                    }
+                }
+                //end trimDots
+
+                name = name.join("/");
+            }
+        }
+
+        //Apply map config if available.
+        if ((baseParts || starMap) && map) {
+            nameParts = name.split('/');
+
+            for (i = nameParts.length; i > 0; i -= 1) {
+                nameSegment = nameParts.slice(0, i).join("/");
+
+                if (baseParts) {
+                    //Find the longest baseName segment match in the config.
+                    //So, do joins on the biggest to smallest lengths of baseParts.
+                    for (j = baseParts.length; j > 0; j -= 1) {
+                        mapValue = map[baseParts.slice(0, j).join('/')];
+
+                        //baseName segment has  config, find if it has one for
+                        //this name.
+                        if (mapValue) {
+                            mapValue = mapValue[nameSegment];
+                            if (mapValue) {
+                                //Match, update name to the new value.
+                                foundMap = mapValue;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                foundMap = foundMap || starMap[nameSegment];
+
+                if (foundMap) {
+                    nameParts.splice(0, i, foundMap);
+                    name = nameParts.join('/');
+                    break;
+                }
+            }
+        }
+
+        return name;
+    }
+
+    function makeRequire(relName, forceSync) {
+        return function () {
+            //A version of a require function that passes a moduleName
+            //value for items that may need to
+            //look up paths relative to the moduleName
+            return req.apply(undef, aps.call(arguments, 0).concat([relName, forceSync]));
+        };
+    }
+
+    function makeNormalize(relName) {
+        return function (name) {
+            return normalize(name, relName);
+        };
+    }
+
+    function makeLoad(depName) {
+        return function (value) {
+            defined[depName] = value;
+        };
+    }
+
+    function callDep(name) {
+        if (waiting.hasOwnProperty(name)) {
+            var args = waiting[name];
+            delete waiting[name];
+            defining[name] = true;
+            main.apply(undef, args);
+        }
+
+        if (!defined.hasOwnProperty(name)) {
+            throw new Error('No ' + name);
+        }
+        return defined[name];
+    }
+
+    /**
+     * Makes a name map, normalizing the name, and using a plugin
+     * for normalization if necessary. Grabs a ref to plugin
+     * too, as an optimization.
+     */
+    function makeMap(name, relName) {
+        var prefix, plugin,
+            index = name.indexOf('!');
+
+        if (index !== -1) {
+            prefix = normalize(name.slice(0, index), relName);
+            name = name.slice(index + 1);
+            plugin = callDep(prefix);
+
+            //Normalize according
+            if (plugin && plugin.normalize) {
+                name = plugin.normalize(name, makeNormalize(relName));
+            } else {
+                name = normalize(name, relName);
+            }
+        } else {
+            name = normalize(name, relName);
+        }
+
+        //Using ridiculous property names for space reasons
+        return {
+            f: prefix ? prefix + '!' + name : name, //fullName
+            n: name,
+            p: plugin
+        };
+    }
+
+    function makeConfig(name) {
+        return function () {
+            return (config && config.config && config.config[name]) || {};
+        };
+    }
+
+    main = function (name, deps, callback, relName) {
+        var args = [],
+            usingExports,
+            cjsModule, depName, ret, map, i;
+
+        //Use name if no relName
+        relName = relName || name;
+
+        //Call the callback to define the module, if necessary.
+        if (typeof callback === 'function') {
+
+            //Pull out the defined dependencies and pass the ordered
+            //values to the callback.
+            //Default to [require, exports, module] if no deps
+            deps = !deps.length && callback.length ? ['require', 'exports', 'module'] : deps;
+            for (i = 0; i < deps.length; i++) {
+                map = makeMap(deps[i], relName);
+                depName = map.f;
+
+                //Fast path CommonJS standard dependencies.
+                if (depName === "require") {
+                    args[i] = makeRequire(name);
+                } else if (depName === "exports") {
+                    //CommonJS module spec 1.1
+                    args[i] = defined[name] = {};
+                    usingExports = true;
+                } else if (depName === "module") {
+                    //CommonJS module spec 1.1
+                    cjsModule = args[i] = {
+                        id: name,
+                        uri: '',
+                        exports: defined[name],
+                        config: makeConfig(name)
+                    };
+                } else if (defined.hasOwnProperty(depName) || waiting.hasOwnProperty(depName)) {
+                    args[i] = callDep(depName);
+                } else if (map.p) {
+                    map.p.load(map.n, makeRequire(relName, true), makeLoad(depName), {});
+                    args[i] = defined[depName];
+                } else if (!defining[depName]) {
+                    throw new Error(name + ' missing ' + depName);
+                }
+            }
+
+            ret = callback.apply(defined[name], args);
+
+            if (name) {
+                //If setting exports via "module" is in play,
+                //favor that over return value and exports. After that,
+                //favor a non-undefined return value over exports use.
+                if (cjsModule && cjsModule.exports !== undef &&
+                    cjsModule.exports !== defined[name]) {
+                    defined[name] = cjsModule.exports;
+                } else if (ret !== undef || !usingExports) {
+                    //Use the return value from the function.
+                    defined[name] = ret;
+                }
+            }
+        } else if (name) {
+            //May just be an object definition for the module. Only
+            //worry about defining if have a module name.
+            defined[name] = callback;
+        }
+    };
+
+    requirejs = require = req = function (deps, callback, relName, forceSync) {
+        if (typeof deps === "string") {
+            //Just return the module wanted. In this scenario, the
+            //deps arg is the module name, and second arg (if passed)
+            //is just the relName.
+            //Normalize module name, if it contains . or ..
+            return callDep(makeMap(deps, callback).f);
+        } else if (!deps.splice) {
+            //deps is a config object, not an array.
+            config = deps;
+            if (callback.splice) {
+                //callback is an array, which means it is a dependency list.
+                //Adjust args if there are dependencies
+                deps = callback;
+                callback = relName;
+                relName = null;
+            } else {
+                deps = undef;
+            }
+        }
+
+        //Support require(['a'])
+        callback = callback || function () {};
+
+        //Simulate async callback;
+        if (forceSync) {
+            main(undef, deps, callback, relName);
+        } else {
+            setTimeout(function () {
+                main(undef, deps, callback, relName);
+            }, 15);
+        }
+
+        return req;
+    };
+
+    /**
+     * Just drops the config on the floor, but returns req in case
+     * the config return value is used.
+     */
+    req.config = function (cfg) {
+        config = cfg;
+        return req;
+    };
+
+    define = function (name, deps, callback) {
+
+        //This module may not have dependencies
+        if (!deps.splice) {
+            //deps is not an array, so probably means
+            //an object literal or factory function for
+            //the value. Adjust args.
+            callback = deps;
+            deps = [];
+        }
+
+        waiting[name] = [name, deps, callback];
+    };
+
+    define.amd = {
+        jQuery: true
+    };
+}());
+
+define("../vendor/almond", function(){});
 
 // Underscore.js 1.3.1
 // (c) 2009-2012 Jeremy Ashkenas, DocumentCloud Inc.
@@ -11,15 +323,1363 @@
 // Oliver Steele's Functional, and John Resig's Micro-Templating.
 // For all details and documentation:
 // http://documentcloud.github.com/underscore
+(function(){function q(a,c,d){if(a===c)return 0!==a||1/a==1/c;if(null==a||null==c)return a===c;a._chain&&(a=a._wrapped);c._chain&&(c=c._wrapped);if(a.isEqual&&b.isFunction(a.isEqual))return a.isEqual(c);if(c.isEqual&&b.isFunction(c.isEqual))return c.isEqual(a);var e=l.call(a);if(e!=l.call(c))return!1;switch(e){case "[object String]":return a==""+c;case "[object Number]":return a!=+a?c!=+c:0==a?1/a==1/c:a==+c;case "[object Date]":case "[object Boolean]":return+a==+c;case "[object RegExp]":return a.source==
+c.source&&a.global==c.global&&a.multiline==c.multiline&&a.ignoreCase==c.ignoreCase}if("object"!=typeof a||"object"!=typeof c)return!1;for(var f=d.length;f--;)if(d[f]==a)return!0;d.push(a);var f=0,g=!0;if("[object Array]"==e){if(f=a.length,g=f==c.length)for(;f--&&(g=f in a==f in c&&q(a[f],c[f],d)););}else{if("constructor"in a!="constructor"in c||a.constructor!=c.constructor)return!1;for(var h in a)if(b.has(a,h)&&(f++,!(g=b.has(c,h)&&q(a[h],c[h],d))))break;if(g){for(h in c)if(b.has(c,h)&&!f--)break;
+g=!f}}d.pop();return g}var r=this,G=r._,n={},k=Array.prototype,o=Object.prototype,i=k.slice,H=k.unshift,l=o.toString,I=o.hasOwnProperty,w=k.forEach,x=k.map,y=k.reduce,z=k.reduceRight,A=k.filter,B=k.every,C=k.some,p=k.indexOf,D=k.lastIndexOf,o=Array.isArray,J=Object.keys,s=Function.prototype.bind,b=function(a){return new m(a)};"undefined"!==typeof exports?("undefined"!==typeof module&&module.exports&&(exports=module.exports=b),exports._=b):r._=b;b.VERSION="1.3.1";var j=b.each=b.forEach=function(a,
+c,d){if(a!=null)if(w&&a.forEach===w)a.forEach(c,d);else if(a.length===+a.length)for(var e=0,f=a.length;e<f;e++){if(e in a&&c.call(d,a[e],e,a)===n)break}else for(e in a)if(b.has(a,e)&&c.call(d,a[e],e,a)===n)break};b.map=b.collect=function(a,c,b){var e=[];if(a==null)return e;if(x&&a.map===x)return a.map(c,b);j(a,function(a,g,h){e[e.length]=c.call(b,a,g,h)});if(a.length===+a.length)e.length=a.length;return e};b.reduce=b.foldl=b.inject=function(a,c,d,e){var f=arguments.length>2;a==null&&(a=[]);if(y&&
+a.reduce===y){e&&(c=b.bind(c,e));return f?a.reduce(c,d):a.reduce(c)}j(a,function(a,b,i){if(f)d=c.call(e,d,a,b,i);else{d=a;f=true}});if(!f)throw new TypeError("Reduce of empty array with no initial value");return d};b.reduceRight=b.foldr=function(a,c,d,e){var f=arguments.length>2;a==null&&(a=[]);if(z&&a.reduceRight===z){e&&(c=b.bind(c,e));return f?a.reduceRight(c,d):a.reduceRight(c)}var g=b.toArray(a).reverse();e&&!f&&(c=b.bind(c,e));return f?b.reduce(g,c,d,e):b.reduce(g,c)};b.find=b.detect=function(a,
+c,b){var e;E(a,function(a,g,h){if(c.call(b,a,g,h)){e=a;return true}});return e};b.filter=b.select=function(a,c,b){var e=[];if(a==null)return e;if(A&&a.filter===A)return a.filter(c,b);j(a,function(a,g,h){c.call(b,a,g,h)&&(e[e.length]=a)});return e};b.reject=function(a,c,b){var e=[];if(a==null)return e;j(a,function(a,g,h){c.call(b,a,g,h)||(e[e.length]=a)});return e};b.every=b.all=function(a,c,b){var e=true;if(a==null)return e;if(B&&a.every===B)return a.every(c,b);j(a,function(a,g,h){if(!(e=e&&c.call(b,
+a,g,h)))return n});return e};var E=b.some=b.any=function(a,c,d){c||(c=b.identity);var e=false;if(a==null)return e;if(C&&a.some===C)return a.some(c,d);j(a,function(a,b,h){if(e||(e=c.call(d,a,b,h)))return n});return!!e};b.include=b.contains=function(a,c){var b=false;if(a==null)return b;if(p&&a.indexOf===p)return a.indexOf(c)!=-1;return b=E(a,function(a){return a===c})};b.invoke=function(a,c){var d=i.call(arguments,2);return b.map(a,function(a){return(b.isFunction(c)?c||a:a[c]).apply(a,d)})};b.pluck=
+function(a,c){return b.map(a,function(a){return a[c]})};b.max=function(a,c,d){if(!c&&b.isArray(a))return Math.max.apply(Math,a);if(!c&&b.isEmpty(a))return-Infinity;var e={computed:-Infinity};j(a,function(a,b,h){b=c?c.call(d,a,b,h):a;b>=e.computed&&(e={value:a,computed:b})});return e.value};b.min=function(a,c,d){if(!c&&b.isArray(a))return Math.min.apply(Math,a);if(!c&&b.isEmpty(a))return Infinity;var e={computed:Infinity};j(a,function(a,b,h){b=c?c.call(d,a,b,h):a;b<e.computed&&(e={value:a,computed:b})});
+return e.value};b.shuffle=function(a){var b=[],d;j(a,function(a,f){if(f==0)b[0]=a;else{d=Math.floor(Math.random()*(f+1));b[f]=b[d];b[d]=a}});return b};b.sortBy=function(a,c,d){return b.pluck(b.map(a,function(a,b,g){return{value:a,criteria:c.call(d,a,b,g)}}).sort(function(a,b){var c=a.criteria,d=b.criteria;return c<d?-1:c>d?1:0}),"value")};b.groupBy=function(a,c){var d={},e=b.isFunction(c)?c:function(a){return a[c]};j(a,function(a,b){var c=e(a,b);(d[c]||(d[c]=[])).push(a)});return d};b.sortedIndex=
+function(a,c,d){d||(d=b.identity);for(var e=0,f=a.length;e<f;){var g=e+f>>1;d(a[g])<d(c)?e=g+1:f=g}return e};b.toArray=function(a){return!a?[]:a.toArray?a.toArray():b.isArray(a)||b.isArguments(a)?i.call(a):b.values(a)};b.size=function(a){return b.toArray(a).length};b.first=b.head=function(a,b,d){return b!=null&&!d?i.call(a,0,b):a[0]};b.initial=function(a,b,d){return i.call(a,0,a.length-(b==null||d?1:b))};b.last=function(a,b,d){return b!=null&&!d?i.call(a,Math.max(a.length-b,0)):a[a.length-1]};b.rest=
+b.tail=function(a,b,d){return i.call(a,b==null||d?1:b)};b.compact=function(a){return b.filter(a,function(a){return!!a})};b.flatten=function(a,c){return b.reduce(a,function(a,e){if(b.isArray(e))return a.concat(c?e:b.flatten(e));a[a.length]=e;return a},[])};b.without=function(a){return b.difference(a,i.call(arguments,1))};b.uniq=b.unique=function(a,c,d){var d=d?b.map(a,d):a,e=[];b.reduce(d,function(d,g,h){if(0==h||(c===true?b.last(d)!=g:!b.include(d,g))){d[d.length]=g;e[e.length]=a[h]}return d},[]);
+return e};b.union=function(){return b.uniq(b.flatten(arguments,true))};b.intersection=b.intersect=function(a){var c=i.call(arguments,1);return b.filter(b.uniq(a),function(a){return b.every(c,function(c){return b.indexOf(c,a)>=0})})};b.difference=function(a){var c=b.flatten(i.call(arguments,1));return b.filter(a,function(a){return!b.include(c,a)})};b.zip=function(){for(var a=i.call(arguments),c=b.max(b.pluck(a,"length")),d=Array(c),e=0;e<c;e++)d[e]=b.pluck(a,""+e);return d};b.indexOf=function(a,c,
+d){if(a==null)return-1;var e;if(d){d=b.sortedIndex(a,c);return a[d]===c?d:-1}if(p&&a.indexOf===p)return a.indexOf(c);d=0;for(e=a.length;d<e;d++)if(d in a&&a[d]===c)return d;return-1};b.lastIndexOf=function(a,b){if(a==null)return-1;if(D&&a.lastIndexOf===D)return a.lastIndexOf(b);for(var d=a.length;d--;)if(d in a&&a[d]===b)return d;return-1};b.range=function(a,b,d){if(arguments.length<=1){b=a||0;a=0}for(var d=arguments[2]||1,e=Math.max(Math.ceil((b-a)/d),0),f=0,g=Array(e);f<e;){g[f++]=a;a=a+d}return g};
+var F=function(){};b.bind=function(a,c){var d,e;if(a.bind===s&&s)return s.apply(a,i.call(arguments,1));if(!b.isFunction(a))throw new TypeError;e=i.call(arguments,2);return d=function(){if(!(this instanceof d))return a.apply(c,e.concat(i.call(arguments)));F.prototype=a.prototype;var b=new F,g=a.apply(b,e.concat(i.call(arguments)));return Object(g)===g?g:b}};b.bindAll=function(a){var c=i.call(arguments,1);c.length==0&&(c=b.functions(a));j(c,function(c){a[c]=b.bind(a[c],a)});return a};b.memoize=function(a,
+c){var d={};c||(c=b.identity);return function(){var e=c.apply(this,arguments);return b.has(d,e)?d[e]:d[e]=a.apply(this,arguments)}};b.delay=function(a,b){var d=i.call(arguments,2);return setTimeout(function(){return a.apply(a,d)},b)};b.defer=function(a){return b.delay.apply(b,[a,1].concat(i.call(arguments,1)))};b.throttle=function(a,c){var d,e,f,g,h,i=b.debounce(function(){h=g=false},c);return function(){d=this;e=arguments;f||(f=setTimeout(function(){f=null;h&&a.apply(d,e);i()},c));g?h=true:a.apply(d,
+e);i();g=true}};b.debounce=function(a,b){var d;return function(){var e=this,f=arguments;clearTimeout(d);d=setTimeout(function(){d=null;a.apply(e,f)},b)}};b.once=function(a){var b=false,d;return function(){if(b)return d;b=true;return d=a.apply(this,arguments)}};b.wrap=function(a,b){return function(){var d=[a].concat(i.call(arguments,0));return b.apply(this,d)}};b.compose=function(){var a=arguments;return function(){for(var b=arguments,d=a.length-1;d>=0;d--)b=[a[d].apply(this,b)];return b[0]}};b.after=
+function(a,b){return a<=0?b():function(){if(--a<1)return b.apply(this,arguments)}};b.keys=J||function(a){if(a!==Object(a))throw new TypeError("Invalid object");var c=[],d;for(d in a)b.has(a,d)&&(c[c.length]=d);return c};b.values=function(a){return b.map(a,b.identity)};b.functions=b.methods=function(a){var c=[],d;for(d in a)b.isFunction(a[d])&&c.push(d);return c.sort()};b.extend=function(a){j(i.call(arguments,1),function(b){for(var d in b)a[d]=b[d]});return a};b.defaults=function(a){j(i.call(arguments,
+1),function(b){for(var d in b)a[d]==null&&(a[d]=b[d])});return a};b.clone=function(a){return!b.isObject(a)?a:b.isArray(a)?a.slice():b.extend({},a)};b.tap=function(a,b){b(a);return a};b.isEqual=function(a,b){return q(a,b,[])};b.isEmpty=function(a){if(b.isArray(a)||b.isString(a))return a.length===0;for(var c in a)if(b.has(a,c))return false;return true};b.isElement=function(a){return!!(a&&a.nodeType==1)};b.isArray=o||function(a){return l.call(a)=="[object Array]"};b.isObject=function(a){return a===Object(a)};
+b.isArguments=function(a){return l.call(a)=="[object Arguments]"};b.isArguments(arguments)||(b.isArguments=function(a){return!(!a||!b.has(a,"callee"))});b.isFunction=function(a){return l.call(a)=="[object Function]"};b.isString=function(a){return l.call(a)=="[object String]"};b.isNumber=function(a){return l.call(a)=="[object Number]"};b.isNaN=function(a){return a!==a};b.isBoolean=function(a){return a===true||a===false||l.call(a)=="[object Boolean]"};b.isDate=function(a){return l.call(a)=="[object Date]"};
+b.isRegExp=function(a){return l.call(a)=="[object RegExp]"};b.isNull=function(a){return a===null};b.isUndefined=function(a){return a===void 0};b.has=function(a,b){return I.call(a,b)};b.noConflict=function(){r._=G;return this};b.identity=function(a){return a};b.times=function(a,b,d){for(var e=0;e<a;e++)b.call(d,e)};b.escape=function(a){return(""+a).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#x27;").replace(/\//g,"&#x2F;")};b.mixin=function(a){j(b.functions(a),
+function(c){K(c,b[c]=a[c])})};var L=0;b.uniqueId=function(a){var b=L++;return a?a+b:b};b.templateSettings={evaluate:/<%([\s\S]+?)%>/g,interpolate:/<%=([\s\S]+?)%>/g,escape:/<%-([\s\S]+?)%>/g};var t=/.^/,u=function(a){return a.replace(/\\\\/g,"\\").replace(/\\'/g,"'")};b.template=function(a,c){var d=b.templateSettings,d="var __p=[],print=function(){__p.push.apply(__p,arguments);};with(obj||{}){__p.push('"+a.replace(/\\/g,"\\\\").replace(/'/g,"\\'").replace(d.escape||t,function(a,b){return"',_.escape("+
+u(b)+"),'"}).replace(d.interpolate||t,function(a,b){return"',"+u(b)+",'"}).replace(d.evaluate||t,function(a,b){return"');"+u(b).replace(/[\r\n\t]/g," ")+";__p.push('"}).replace(/\r/g,"\\r").replace(/\n/g,"\\n").replace(/\t/g,"\\t")+"');}return __p.join('');",e=new Function("obj","_",d);return c?e(c,b):function(a){return e.call(this,a,b)}};b.chain=function(a){return b(a).chain()};var m=function(a){this._wrapped=a};b.prototype=m.prototype;var v=function(a,c){return c?b(a).chain():a},K=function(a,c){m.prototype[a]=
+function(){var a=i.call(arguments);H.call(a,this._wrapped);return v(c.apply(b,a),this._chain)}};b.mixin(b);j("pop,push,reverse,shift,sort,splice,unshift".split(","),function(a){var b=k[a];m.prototype[a]=function(){var d=this._wrapped;b.apply(d,arguments);var e=d.length;(a=="shift"||a=="splice")&&e===0&&delete d[0];return v(d,this._chain)}});j(["concat","join","slice"],function(a){var b=k[a];m.prototype[a]=function(){return v(b.apply(this._wrapped,arguments),this._chain)}});m.prototype.chain=function(){this._chain=
+true;return this};m.prototype.value=function(){return this._wrapped};"function"===typeof define&&define.amd&&define("underscore",[],function(){return b})}).call(this);
+
+// This module acts as jQuery adapter and returns the global
+// jQuery object.
+//
+// This is a workaround to create builds without jQuery.
+// The Backbone AMD module requires jQuery. If the jQuery module
+// is excluded from the build, almond will throw an exception. 
+// (See: https://github.com/jrburke/almond/issues/12)
+define('jquery',[],function() {
+  return jQuery;
+});
+
+// Backbone.js 0.9.2
 
 // (c) 2010-2012 Jeremy Ashkenas, DocumentCloud Inc.
 // Backbone may be freely distributed under the MIT license.
 // For all details and documentation:
 // http://backbonejs.org
+(function(h,g){"undefined"!==typeof exports?g(h,exports,require("underscore")):"function"===typeof define&&define.amd?define('backbone',["underscore","jquery","exports"],function(f,i,p){h.Backbone=g(h,p,f,i)}):h.Backbone=g(h,{},h._,h.jQuery||h.Zepto||h.ender)})(this,function(h,g,f,i){var p=h.Backbone,y=Array.prototype.slice,z=Array.prototype.splice;g.VERSION="0.9.2";g.setDomLibrary=function(a){i=a};g.noConflict=function(){h.Backbone=p;return g};g.emulateHTTP=!1;g.emulateJSON=!1;var q=/\s+/,l=g.Events={on:function(a,
+b,c){var d,e,f,g,j;if(!b)return this;a=a.split(q);for(d=this._callbacks||(this._callbacks={});e=a.shift();)f=(j=d[e])?j.tail:{},f.next=g={},f.context=c,f.callback=b,d[e]={tail:g,next:j?j.next:f};return this},off:function(a,b,c){var d,e,k,g,j,h;if(e=this._callbacks){if(!a&&!b&&!c)return delete this._callbacks,this;for(a=a?a.split(q):f.keys(e);d=a.shift();)if(k=e[d],delete e[d],k&&(b||c))for(g=k.tail;(k=k.next)!==g;)if(j=k.callback,h=k.context,b&&j!==b||c&&h!==c)this.on(d,j,h);return this}},trigger:function(a){var b,
+c,d,e,f,g;if(!(d=this._callbacks))return this;f=d.all;a=a.split(q);for(g=y.call(arguments,1);b=a.shift();){if(c=d[b])for(e=c.tail;(c=c.next)!==e;)c.callback.apply(c.context||this,g);if(c=f){e=c.tail;for(b=[b].concat(g);(c=c.next)!==e;)c.callback.apply(c.context||this,b)}}return this}};l.bind=l.on;l.unbind=l.off;var o=g.Model=function(a,b){var c;a||(a={});b&&b.parse&&(a=this.parse(a));if(c=n(this,"defaults"))a=f.extend({},c,a);b&&b.collection&&(this.collection=b.collection);this.attributes={};this._escapedAttributes=
+{};this.cid=f.uniqueId("c");this.changed={};this._silent={};this._pending={};this.set(a,{silent:!0});this.changed={};this._silent={};this._pending={};this._previousAttributes=f.clone(this.attributes);this.initialize.apply(this,arguments)};f.extend(o.prototype,l,{changed:null,_silent:null,_pending:null,idAttribute:"id",initialize:function(){},toJSON:function(){return f.clone(this.attributes)},get:function(a){return this.attributes[a]},escape:function(a){var b;if(b=this._escapedAttributes[a])return b;
+b=this.get(a);return this._escapedAttributes[a]=f.escape(null==b?"":""+b)},has:function(a){return null!=this.get(a)},set:function(a,b,c){var d,e;f.isObject(a)||null==a?(d=a,c=b):(d={},d[a]=b);c||(c={});if(!d)return this;d instanceof o&&(d=d.attributes);if(c.unset)for(e in d)d[e]=void 0;if(!this._validate(d,c))return!1;this.idAttribute in d&&(this.id=d[this.idAttribute]);var b=c.changes={},g=this.attributes,h=this._escapedAttributes,j=this._previousAttributes||{};for(e in d){a=d[e];if(!f.isEqual(g[e],
+a)||c.unset&&f.has(g,e))delete h[e],(c.silent?this._silent:b)[e]=!0;c.unset?delete g[e]:g[e]=a;!f.isEqual(j[e],a)||f.has(g,e)!=f.has(j,e)?(this.changed[e]=a,c.silent||(this._pending[e]=!0)):(delete this.changed[e],delete this._pending[e])}c.silent||this.change(c);return this},unset:function(a,b){(b||(b={})).unset=!0;return this.set(a,null,b)},clear:function(a){(a||(a={})).unset=!0;return this.set(f.clone(this.attributes),a)},fetch:function(a){var a=a?f.clone(a):{},b=this,c=a.success;a.success=function(d,
+e,f){if(!b.set(b.parse(d,f),a))return!1;c&&c(b,d)};a.error=g.wrapError(a.error,b,a);return(this.sync||g.sync).call(this,"read",this,a)},save:function(a,b,c){var d,e;f.isObject(a)||null==a?(d=a,c=b):(d={},d[a]=b);c=c?f.clone(c):{};if(c.wait){if(!this._validate(d,c))return!1;e=f.clone(this.attributes)}a=f.extend({},c,{silent:!0});if(d&&!this.set(d,c.wait?a:c))return!1;var k=this,h=c.success;c.success=function(a,b,e){b=k.parse(a,e);if(c.wait){delete c.wait;b=f.extend(d||{},b)}if(!k.set(b,c))return false;
+h?h(k,a):k.trigger("sync",k,a,c)};c.error=g.wrapError(c.error,k,c);b=this.isNew()?"create":"update";b=(this.sync||g.sync).call(this,b,this,c);c.wait&&this.set(e,a);return b},destroy:function(a){var a=a?f.clone(a):{},b=this,c=a.success,d=function(){b.trigger("destroy",b,b.collection,a)};if(this.isNew())return d(),!1;a.success=function(e){a.wait&&d();c?c(b,e):b.trigger("sync",b,e,a)};a.error=g.wrapError(a.error,b,a);var e=(this.sync||g.sync).call(this,"delete",this,a);a.wait||d();return e},url:function(){var a=
+n(this,"urlRoot")||n(this.collection,"url")||t();return this.isNew()?a:a+("/"==a.charAt(a.length-1)?"":"/")+encodeURIComponent(this.id)},parse:function(a){return a},clone:function(){return new this.constructor(this.attributes)},isNew:function(){return null==this.id},change:function(a){a||(a={});var b=this._changing;this._changing=!0;for(var c in this._silent)this._pending[c]=!0;var d=f.extend({},a.changes,this._silent);this._silent={};for(c in d)this.trigger("change:"+c,this,this.get(c),a);if(b)return this;
+for(;!f.isEmpty(this._pending);){this._pending={};this.trigger("change",this,a);for(c in this.changed)!this._pending[c]&&!this._silent[c]&&delete this.changed[c];this._previousAttributes=f.clone(this.attributes)}this._changing=!1;return this},hasChanged:function(a){return!arguments.length?!f.isEmpty(this.changed):f.has(this.changed,a)},changedAttributes:function(a){if(!a)return this.hasChanged()?f.clone(this.changed):!1;var b,c=!1,d=this._previousAttributes,e;for(e in a)if(!f.isEqual(d[e],b=a[e]))(c||
+(c={}))[e]=b;return c},previous:function(a){return!arguments.length||!this._previousAttributes?null:this._previousAttributes[a]},previousAttributes:function(){return f.clone(this._previousAttributes)},isValid:function(){return!this.validate(this.attributes)},_validate:function(a,b){if(b.silent||!this.validate)return!0;var a=f.extend({},this.attributes,a),c=this.validate(a,b);if(!c)return!0;b&&b.error?b.error(this,c,b):this.trigger("error",this,c,b);return!1}});var r=g.Collection=function(a,b){b||
+(b={});b.model&&(this.model=b.model);b.comparator&&(this.comparator=b.comparator);this._reset();this.initialize.apply(this,arguments);a&&this.reset(a,{silent:!0,parse:b.parse})};f.extend(r.prototype,l,{model:o,initialize:function(){},toJSON:function(a){return this.map(function(b){return b.toJSON(a)})},add:function(a,b){var c,d,e,g,h,j={},i={},l=[];b||(b={});a=f.isArray(a)?a.slice():[a];c=0;for(d=a.length;c<d;c++){if(!(e=a[c]=this._prepareModel(a[c],b)))throw Error("Can't add an invalid model to a collection");
+g=e.cid;h=e.id;j[g]||this._byCid[g]||null!=h&&(i[h]||this._byId[h])?l.push(c):j[g]=i[h]=e}for(c=l.length;c--;)a.splice(l[c],1);c=0;for(d=a.length;c<d;c++)(e=a[c]).on("all",this._onModelEvent,this),this._byCid[e.cid]=e,null!=e.id&&(this._byId[e.id]=e);this.length+=d;z.apply(this.models,[null!=b.at?b.at:this.models.length,0].concat(a));this.comparator&&this.sort({silent:!0});if(b.silent)return this;c=0;for(d=this.models.length;c<d;c++)if(j[(e=this.models[c]).cid])b.index=c,e.trigger("add",e,this,b);
+return this},remove:function(a,b){var c,d,e,g;b||(b={});a=f.isArray(a)?a.slice():[a];c=0;for(d=a.length;c<d;c++)if(g=this.getByCid(a[c])||this.get(a[c]))delete this._byId[g.id],delete this._byCid[g.cid],e=this.indexOf(g),this.models.splice(e,1),this.length--,b.silent||(b.index=e,g.trigger("remove",g,this,b)),this._removeReference(g);return this},push:function(a,b){a=this._prepareModel(a,b);this.add(a,b);return a},pop:function(a){var b=this.at(this.length-1);this.remove(b,a);return b},unshift:function(a,
+b){a=this._prepareModel(a,b);this.add(a,f.extend({at:0},b));return a},shift:function(a){var b=this.at(0);this.remove(b,a);return b},get:function(a){return null==a?void 0:this._byId[null!=a.id?a.id:a]},getByCid:function(a){return a&&this._byCid[a.cid||a]},at:function(a){return this.models[a]},where:function(a){return f.isEmpty(a)?[]:this.filter(function(b){for(var c in a)if(a[c]!==b.get(c))return!1;return!0})},sort:function(a){a||(a={});if(!this.comparator)throw Error("Cannot sort a set without a comparator");
+var b=f.bind(this.comparator,this);1==this.comparator.length?this.models=this.sortBy(b):this.models.sort(b);a.silent||this.trigger("reset",this,a);return this},pluck:function(a){return f.map(this.models,function(b){return b.get(a)})},reset:function(a,b){a||(a=[]);b||(b={});for(var c=0,d=this.models.length;c<d;c++)this._removeReference(this.models[c]);this._reset();this.add(a,f.extend({silent:!0},b));b.silent||this.trigger("reset",this,b);return this},fetch:function(a){a=a?f.clone(a):{};void 0===a.parse&&
+(a.parse=!0);var b=this,c=a.success;a.success=function(d,e,f){b[a.add?"add":"reset"](b.parse(d,f),a);c&&c(b,d)};a.error=g.wrapError(a.error,b,a);return(this.sync||g.sync).call(this,"read",this,a)},create:function(a,b){var c=this,b=b?f.clone(b):{},a=this._prepareModel(a,b);if(!a)return!1;b.wait||c.add(a,b);var d=b.success;b.success=function(e,f){b.wait&&c.add(e,b);d?d(e,f):e.trigger("sync",a,f,b)};a.save(null,b);return a},parse:function(a){return a},chain:function(){return f(this.models).chain()},
+_reset:function(){this.length=0;this.models=[];this._byId={};this._byCid={}},_prepareModel:function(a,b){b||(b={});a instanceof o?a.collection||(a.collection=this):(b.collection=this,a=new this.model(a,b),a._validate(a.attributes,b)||(a=!1));return a},_removeReference:function(a){this==a.collection&&delete a.collection;a.off("all",this._onModelEvent,this)},_onModelEvent:function(a,b,c,d){("add"==a||"remove"==a)&&c!=this||("destroy"==a&&this.remove(b,d),b&&a==="change:"+b.idAttribute&&(delete this._byId[b.previous(b.idAttribute)],
+this._byId[b.id]=b),this.trigger.apply(this,arguments))}});f.each("forEach,each,map,reduce,reduceRight,find,detect,filter,select,reject,every,all,some,any,include,contains,invoke,max,min,sortBy,sortedIndex,toArray,size,first,initial,rest,last,without,indexOf,shuffle,lastIndexOf,isEmpty,groupBy".split(","),function(a){r.prototype[a]=function(){return f[a].apply(f,[this.models].concat(f.toArray(arguments)))}});var u=g.Router=function(a){a||(a={});a.routes&&(this.routes=a.routes);this._bindRoutes();
+this.initialize.apply(this,arguments)},A=/:\w+/g,B=/\*\w+/g,C=/[-[\]{}()+?.,\\^$|#\s]/g;f.extend(u.prototype,l,{initialize:function(){},route:function(a,b,c){g.history||(g.history=new m);f.isRegExp(a)||(a=this._routeToRegExp(a));c||(c=this[b]);g.history.route(a,f.bind(function(d){d=this._extractParameters(a,d);c&&c.apply(this,d);this.trigger.apply(this,["route:"+b].concat(d));g.history.trigger("route",this,b,d)},this));return this},navigate:function(a,b){g.history.navigate(a,b)},_bindRoutes:function(){if(this.routes){var a=
+[],b;for(b in this.routes)a.unshift([b,this.routes[b]]);b=0;for(var c=a.length;b<c;b++)this.route(a[b][0],a[b][1],this[a[b][1]])}},_routeToRegExp:function(a){a=a.replace(C,"\\$&").replace(A,"([^/]+)").replace(B,"(.*?)");return RegExp("^"+a+"$")},_extractParameters:function(a,b){return a.exec(b).slice(1)}});var m=g.History=function(){this.handlers=[];f.bindAll(this,"checkUrl")},s=/^[#\/]/,D=/msie [\w.]+/;m.started=!1;f.extend(m.prototype,l,{interval:50,getHash:function(a){return(a=(a?a.location:window.location).href.match(/#(.*)$/))?
+a[1]:""},getFragment:function(a,b){if(null==a)if(this._hasPushState||b){var a=window.location.pathname,c=window.location.search;c&&(a+=c)}else a=this.getHash();a.indexOf(this.options.root)||(a=a.substr(this.options.root.length));return a.replace(s,"")},start:function(a){if(m.started)throw Error("Backbone.history has already been started");m.started=!0;this.options=f.extend({},{root:"/"},this.options,a);this._wantsHashChange=!1!==this.options.hashChange;this._wantsPushState=!!this.options.pushState;
+this._hasPushState=!(!this.options.pushState||!window.history||!window.history.pushState);var a=this.getFragment(),b=document.documentMode;if(b=D.exec(navigator.userAgent.toLowerCase())&&(!b||7>=b))this.iframe=i('<iframe src="javascript:0" tabindex="-1" />').hide().appendTo("body")[0].contentWindow,this.navigate(a);this._hasPushState?i(window).bind("popstate",this.checkUrl):this._wantsHashChange&&"onhashchange"in window&&!b?i(window).bind("hashchange",this.checkUrl):this._wantsHashChange&&(this._checkUrlInterval=
+setInterval(this.checkUrl,this.interval));this.fragment=a;a=window.location;b=a.pathname==this.options.root;if(this._wantsHashChange&&this._wantsPushState&&!this._hasPushState&&!b)return this.fragment=this.getFragment(null,!0),window.location.replace(this.options.root+"#"+this.fragment),!0;this._wantsPushState&&this._hasPushState&&b&&a.hash&&(this.fragment=this.getHash().replace(s,""),window.history.replaceState({},document.title,a.protocol+"//"+a.host+this.options.root+this.fragment));if(!this.options.silent)return this.loadUrl()},
+stop:function(){i(window).unbind("popstate",this.checkUrl).unbind("hashchange",this.checkUrl);clearInterval(this._checkUrlInterval);m.started=!1},route:function(a,b){this.handlers.unshift({route:a,callback:b})},checkUrl:function(){var a=this.getFragment();a==this.fragment&&this.iframe&&(a=this.getFragment(this.getHash(this.iframe)));if(a==this.fragment)return!1;this.iframe&&this.navigate(a);this.loadUrl()||this.loadUrl(this.getHash())},loadUrl:function(a){var b=this.fragment=this.getFragment(a);return f.any(this.handlers,
+function(a){if(a.route.test(b))return a.callback(b),!0})},navigate:function(a,b){if(!m.started)return!1;if(!b||!0===b)b={trigger:b};var c=(a||"").replace(s,"");this.fragment!=c&&(this._hasPushState?(0!=c.indexOf(this.options.root)&&(c=this.options.root+c),this.fragment=c,window.history[b.replace?"replaceState":"pushState"]({},document.title,c)):this._wantsHashChange?(this.fragment=c,this._updateHash(window.location,c,b.replace),this.iframe&&c!=this.getFragment(this.getHash(this.iframe))&&(b.replace||
+this.iframe.document.open().close(),this._updateHash(this.iframe.location,c,b.replace))):window.location.assign(this.options.root+a),b.trigger&&this.loadUrl(a))},_updateHash:function(a,b,c){c?a.replace(a.toString().replace(/(javascript:|#).*$/,"")+"#"+b):a.hash=b}});var v=g.View=function(a){this.cid=f.uniqueId("view");this._configure(a||{});this._ensureElement();this.initialize.apply(this,arguments);this.delegateEvents()},E=/^(\S+)\s*(.*)$/,w="model,collection,el,id,attributes,className,tagName".split(",");
+f.extend(v.prototype,l,{tagName:"div",$:function(a){return this.$el.find(a)},initialize:function(){},render:function(){return this},remove:function(){this.$el.remove();return this},make:function(a,b,c){a=document.createElement(a);b&&i(a).attr(b);null!=c&&i(a).html(c);return a},setElement:function(a,b){this.$el&&this.undelegateEvents();this.$el=a instanceof i?a:i(a);this.el=this.$el[0];!1!==b&&this.delegateEvents();return this},delegateEvents:function(a){if(a||(a=n(this,"events"))){this.undelegateEvents();
+for(var b in a){var c=a[b];f.isFunction(c)||(c=this[a[b]]);if(!c)throw Error('Method "'+a[b]+'" does not exist');var d=b.match(E),e=d[1],d=d[2],c=f.bind(c,this),e=e+(".delegateEvents"+this.cid);""===d?this.$el.bind(e,c):this.$el.delegate(d,e,c)}}},undelegateEvents:function(){this.$el.unbind(".delegateEvents"+this.cid)},_configure:function(a){this.options&&(a=f.extend({},this.options,a));for(var b=0,c=w.length;b<c;b++){var d=w[b];a[d]&&(this[d]=a[d])}this.options=a},_ensureElement:function(){if(this.el)this.setElement(this.el,
+!1);else{var a=n(this,"attributes")||{};this.id&&(a.id=this.id);this.className&&(a["class"]=this.className);this.setElement(this.make(this.tagName,a),!1)}}});o.extend=r.extend=u.extend=v.extend=function(a,b){var c=F(this,a,b);c.extend=this.extend;return c};var G={create:"POST",update:"PUT","delete":"DELETE",read:"GET"};g.sync=function(a,b,c){var d=G[a];c||(c={});var e={type:d,dataType:"json"};c.url||(e.url=n(b,"url")||t());if(!c.data&&b&&("create"==a||"update"==a))e.contentType="application/json",
+e.data=JSON.stringify(b.toJSON());g.emulateJSON&&(e.contentType="application/x-www-form-urlencoded",e.data=e.data?{model:e.data}:{});if(g.emulateHTTP&&("PUT"===d||"DELETE"===d))g.emulateJSON&&(e.data._method=d),e.type="POST",e.beforeSend=function(a){a.setRequestHeader("X-HTTP-Method-Override",d)};"GET"!==e.type&&!g.emulateJSON&&(e.processData=!1);return i.ajax(f.extend(e,c))};g.wrapError=function(a,b,c){return function(d,e){e=d===b?e:d;a?a(b,e,c):b.trigger("error",b,e,c)}};var x=function(){},F=function(a,
+b,c){var d;d=b&&b.hasOwnProperty("constructor")?b.constructor:function(){a.apply(this,arguments)};f.extend(d,a);x.prototype=a.prototype;d.prototype=new x;b&&f.extend(d.prototype,b);c&&f.extend(d,c);d.prototype.constructor=d;d.__super__=a.prototype;return d},n=function(a,b){return!a||!a[b]?null:f.isFunction(a[b])?a[b]():a[b]},t=function(){throw Error('A "url" property or function must be specified');};return g});
+
+/**
+ * A module that provides inheritance helpers
+ *
+ * @module ginseng/helpers/inheritance
+ *
+ * @requires underscore
+ */
+define('ginseng/helpers/inheritance',[
+  'underscore'
+], function(
+  _
+) {
+  
+
+  var exports = {
+
+    /**
+     * This function implements a pattern for pseudo-classical inheritance.
+     * The returned "class" inherits from the given parent "class" with the
+     * given additional prototype properties (= instance properties)
+     * and static properties (= class properties).
+     *
+     * Example:
+     * var Car = function() { .. };
+     * var SportsCar = inherit(Car, { seats: 2 }, { vendors: ['ferrari', 'porsche'] };
+     *
+     * @param {function} parent from which the returned child will inherit
+     * @param {object} [protoProps] object with prototype properties (= instance properties)
+     * @param {object} [staticProps] object with static properties (= class properties)
+     * @returns {function} child which inherits from parent with the given prototype and static properties
+     */
+    inherit: function(Parent, protoProps, staticProps) {
+
+      var Child;
+
+      // allow to provide custom constructor via protoProps.constructor
+      if (protoProps && protoProps.hasOwnProperty('constructor')) {
+        Child = protoProps.constructor;
+      } else {
+        // if no constructor has been provided we return default constructor
+        // which uses the Parent constructor
+        Child = function() {
+          return Parent.apply(this, arguments);
+        };
+      }
+      
+      // inherit static properties from Parent
+      // => copy all (static) properties from Parent to Child
+      // @see http://documentcloud.github.com/underscore/#extend
+      _.extend(Child, Parent);
+
+      // inherit prototype properties from Parent via intermediate constructor 
+      // to avoid having to invoke the Parent constructor directly (Child.prototype = new Parent())
+      // which could create unwanted state or fail in absence of input arguments
+      function F() {}
+      F.prototype = Parent.prototype;
+      Child.prototype = new F();
+
+      // copy given prototype properties to Child
+      // (may override Parent prototype properties)
+      if(protoProps) {
+        _.extend(Child.prototype, protoProps);
+      }
+
+      // copy given static properties to Child
+      // (may override static Parent properties)
+      if(staticProps) {
+        _.extend(Child, staticProps);
+      }
+
+      // set Child's prototype constructor property to Child
+      // else it would be Parent
+      Child.prototype.constructor = Child;
+
+      // make Parent's prototype available via Child's prototype __super__ property
+      // this allows f.e. calling overriden methods: this.__super__.someOverridenFunction.call(this)
+      Child.prototype.__super__ = Parent.prototype;
+
+      return Child;
+    },
+
+
+    /**
+     * This function implements the mixin pattern.
+     * It extends a given object with all the properties from passed in object(s).
+     *
+     * Example:
+     * var Car = function() {};
+     * var Driveable = { drive: function() {} };
+     * mixin(Car.prototype, Driveable);
+     *
+     * @param {object} target object
+     * @param {object*} list of objects which properties will be mixed into target object
+     */
+    mixin: function(target) {
+      _.extend.apply(null, arguments);
+
+      return target;
+    }
+
+  };
+
+  return exports;
+});
+
+/**
+ * A module that provides an extendable mixin
+ * 
+ * @module ginseng/mixins/extendable
+ *
+ * @requires ginseng/helpers/inheritance
+ */
+define('ginseng/mixins/extendable',[
+  '../helpers/inheritance'
+], function(
+  InheritanceHelpers
+) {
+  
+
+  var exports = {
+
+    /**
+     * Create a new object ("child class") which inherits from this ("parent class").
+     * Note: The new object will be extendable again
+     *
+     * @param {object} [protoProps] object with prototype properties (= instance properties)
+     * @param {object} [staticProps] object with static properties (= class properties)
+     *
+     * @returns {object} new child object
+     */
+    extend: function(protoProps, staticProps) {
+      var Child = InheritanceHelpers.inherit(this, protoProps, staticProps);
+
+      return Child;
+    }
+  
+  };
+
+  return exports;
+});
+
+/**
+ * A module that provides a mixable mixin
+ * @module ginseng/mixins/mixable
+ *
+ * @requires ginseng/helpers/inheritance
+ */
+define('ginseng/mixins/mixable',[
+  '../helpers/inheritance'
+], function(
+  InheritanceHelpers
+) {
+  
+
+  var exports = {
+
+    /**
+     * Mixes given objects into call context
+     *
+     * @param {object*} objects to mix into this
+     * @returns {object} mixed object
+     */
+    mixin: function() {
+      // convert args to array and prepend this as first argument
+      var args = Array.prototype.slice.call(arguments);
+      args = [ this ].concat(args);
+
+      // mixin objects and return this
+      return InheritanceHelpers.mixin.apply(null, args);
+    }
+  
+  };
+
+  return exports;
+
+});
+
+/**
+ * A module that provides an abstract base for modular components.
+ *
+ * @module ginseng/modular_base
+ * 
+ * @requires underscore
+ * @requires backbone
+ * @requires ginseng/mixins/extendable
+ * @requires ginseng/mixins/mixable
+ */
+define('ginseng/modular_base',[
+  'underscore',
+  'backbone',
+  './mixins/extendable',
+  './mixins/mixable'
+], function(
+  _, Backbone,
+  Extendable, Mixable
+) {
+  
+
+  /**
+   * Creates an abstract base for modular components.
+   * @constructor
+   *
+   * @param {object} [options] - object hash with modular base options
+   */
+  var exports = function(options) {
+    var load, unload, finalize;
+
+    // default arguments
+    if(!options) options = {};
+    
+    // initialize instance variables
+    this.options = options;
+    this.modules = [];
+    // the loaded flag indicates whether the module us currently loaded or not 
+    // default: false = not loaded
+    this.loaded = false;
+    // the module is considered to be cold when it hasn't been loaded yet
+    // default: true = cold
+    this.cold = true;
+
+    if(this.router && this.routes) {
+      createRoutes.call(this);
+    }
+
+    // define/overwrite #load and ensure that prototype function #_load
+    // is called after child function #load when child implements it
+    load = this.load;
+    this.load = function() {      
+      if(_.isFunction(load))
+        load.call(this);
+      exports.prototype._load.call(this);
+    };
+
+    // define/overwrite #unload and ensure that prototype function #_unload
+    // is called before child function #unload when child implements it
+    unload = this.unload;
+    this.unload = function() {
+      exports.prototype._unload.call(this);
+      if(_.isFunction(unload))
+        unload.call(this);
+    };
+
+    // define/overwrite #finalize and ensure that prototype function #_finalize
+    // is called before child function #finalize when child implements it
+    finalize = this.finalize;
+    this.finalize = function() {
+      exports.prototype._finalize.call(this);
+      if(_.isFunction(finalize))
+        finalize.call(this);
+    };
+    
+    this.initialize.call(this, options);
+  };
+
+  _.extend(exports.prototype, Mixable, Backbone.Events, {
+
+    // dummy function which should be overwritten by concrete class
+    initialize: function() {},
+
+    _load: function() {
+      if(this.cold) {
+        if(this.router) {
+          // bind all routes to it's callbacks and create
+          // callbacks to autoload routable modules.
+          // this only has to be done once, when the module
+          // is cold (hasn't been loaded before)
+          bindRoutes.call(this);
+        }  
+        // set the cold flag to false as soon as the
+        // module has been loaded once
+        this.cold = false;
+      }
+
+      // autoload modules
+      _.each(_.filter(this.modules, function(module) {  return module.autoload === true; }), function(module) {
+        module.instance.load();
+      });
+
+      // start router
+      if(this.router) {
+        this.router.start();
+      }
+
+      this.loaded = true;
+    },
+
+    _unload: function() {
+      _.each(this.modules, function(module) {
+        if(module.instance.loaded)
+          module.instance.unload();
+      });
+
+      if(this.router) {
+        this.router.stop();
+      }
+
+      this.loaded = false;
+    },
+
+    _finalize: function() {
+      _.each(this.modules, function(module) {
+        // if module is loaded -> unload it first
+        if(module.instance.loaded)
+          module.instance.unload();
+
+        module.instance.finalize();
+      });
+    },
+
+    /**
+     * Dummy function which will be overwritten by core/module
+     *
+     * @instance
+     */
+    moduleFactory: function() { return null; },
+
+    /**
+     * Adds a new module instance from the given module constructor
+     * with the given options to the instance. If the autoload parameter
+     * is true the module gets automatically loaded. When the paramter
+     * is set to false, it must be loaded manually. If autoload is a
+     * String, it is expected to be a name of an existing route from #router.
+     * Then, the module will automatically be loaded when #router triggers
+     * matching route events.
+     *
+     * @instance
+     *
+     * @param {function} moduleCtor - module constructor
+     * @param {object} moduleOptions - object hash with module options
+     * @param {boolean/string} [autoload=true] - true, false or route name
+     *
+     */
+    addModule: function(moduleCtor, moduleOptions, autoload) {
+      // default arguments
+      if(_.isUndefined(moduleOptions)) {
+        moduleOptions = {};
+      }
+      if(_.isUndefined(autoload)) {
+        autoload = true;
+      }
+
+      // argument validation
+      if(!_.isFunction(moduleCtor)) {
+        throw new Error('moduleCtor argument must be a constructor');
+      } 
+      if(!_.isObject(moduleOptions)) {
+        throw new Error('moduleOptions argument must be a options object');
+      }
+      // TODO: add path validation with regexp
+      if(!_.isBoolean(autoload) && !_.isString(autoload)) {
+        throw new Error('autoload argument must be a boolean or string');
+      }
+      if(_.isString(autoload) && !this.router) {
+        throw new Error(this.toString() + ' is not routable and therefore cannot manage routable module at url fragment "' + autoload + '"');
+      }
+
+      if(_.isString(autoload)) {
+        // autoload is routeName
+        var routeName = autoload;
+        
+        // raise error when router doesn't define the route
+        if(!this.router.hasRoute(routeName)) {
+          throw new Error('Route with name ' + autoload + ' is not defined');
+        }
+
+        var baseRoute = this.router.getRoute(routeName),
+            baseRouteName = routeName;
+
+        if(this.router.baseRoute && this.router.baseRouteName) {
+          baseRoute = this.router.baseRoute + '/' + baseRoute;
+          baseRouteName = this.router.baseRouteName + '_' + baseRouteName; 
+        }
+
+        moduleOptions.baseRoute = baseRoute;
+        moduleOptions.baseRouteName = baseRouteName;
+
+      } else if( moduleOptions.baseRoute || moduleOptions.baseRouteName ) {
+        // if autoload is not route but moduleOptions has baseRoute and/or baseRouteName
+        // => delete properties
+        delete moduleOptions.baseRoute;
+        delete moduleOptions.baseRouteName;
+      }
+
+      var instance = this.moduleFactory(moduleCtor, moduleOptions);
+
+      var module = {
+        ctor: moduleCtor,
+        instance: instance,
+        autoload: autoload
+      };
+
+      this.modules.push(module); 
+
+      // if the added module is routable all relative routes defined
+      // by the module must also be created for this module (parent)
+      // because the created module will be started automatically by this
+      // module (parent) when the current url fragment matches a route defined
+      // by the created module.
+      if(isRoutableModule(module)) {
+        createModuleRoutes.call(this, module);
+      }
+
+      return instance;
+    },
+
+
+    /**
+     * Load the given module instance
+     * @instance
+     *
+     * @param {ginseng/module} moduleInstance - module instance to load
+     */
+    loadModule: function(moduleInstance) {
+      if(moduleInstance.loaded) return;
+      
+      if(moduleInstance.isRoutable()) {
+        // unload routable modules
+        _.chain(this.modules)
+          .filter(function(module) { return isRoutableModule(module); })
+          .each(function(module) {
+            if(module.instance.loaded) {
+              module.instance.unload();
+            }
+          });
+      }
+
+      moduleInstance.load(); 
+    },
+
+    /**
+     * Returns an array containing the routes managed by the
+     * module. If the module is not routable it returns an
+     * empty array.
+     *
+     * @instance
+     *
+     * @returns {array} routes array
+     */
+    getRoutes: function() {
+      if(!this.router) return [];
+      return _.clone(this.router.routes);
+    },
+
+    /**
+     * Returns true when module has routes and false otherwise
+     * @instance
+     *
+     * @returns {boolean} true when module has routes, false otherwise
+     */
+    hasRoutes: function() {
+      return ! _.isEmpty(this.getRoutes());
+    }
+
+  });
+
+  _.extend(exports, Mixable, Extendable);
+
+
+
+  // ######################
+  // ## Helper functions ##
+  // ######################
+
+  /**
+   * This function determines whether a given module instance is
+   * routable or not.
+   *
+   * @private
+   *
+   * @param {object} module - module representation: ctor, instance and autoload
+   * @returns {boolean} true when module is routable, false otherwise
+   */
+  var isRoutableModule = function(module) {
+    return _.isString(module.autoload);
+  };
+
+
+  /**
+   * This function creates routes from the #routes object.
+   *
+   * @private
+   */
+  var createRoutes = function() {
+    var routes = [];
+    for (var route in this.routes) {
+      routes.unshift([route, this.routes[route]]);
+    }
+    for (var i = 0, l = routes.length; i < l; i++) {
+      this.router.route(routes[i][0], routes[i][1]);
+    } 
+  };
+
+
+  /**
+   * This function creates routes on the current module router
+   * which are managed by the given child module in order to
+   * handle autoloading.
+   *
+   * @private
+   *
+   * @param {object} module - module representation: ctor, instance and autoload
+   */
+  var createModuleRoutes = function(module) {
+    var moduleRoutes = module.instance.getRoutes(),
+        relativeBaseRoute, relativeBaseRouteName;
+
+    // return if module doesn't have routes
+    if(_.isEmpty(moduleRoutes)) return;
+
+    relativeBaseRoute = this.router.getRoute(module.autoload);
+    relativeBaseRouteName = module.autoload;
+    
+    _.each(moduleRoutes, function(route) {
+      // return if route is relative root url
+      // because then it's already managed by this module router
+      // (it's the same route as the route assigned to module.autoload)
+      if(route.route === '') return;
+
+      var prefixedRoute, prefixedRouteName;
+
+      prefixedRoute = relativeBaseRoute + '/' + route.route;
+      prefixedRouteName = relativeBaseRouteName + '_' + route.name;
+
+      // when route is already defined -> do not add it again
+      // this happens when the router is core router
+      // because all routes are already created via the core router 
+      if(!this.router.hasRoute(prefixedRouteName)) {
+        this.router.route(prefixedRoute, prefixedRouteName , false );
+      }
+
+    }, this);
+  };
+
+
+  /**
+   * This function binds routes to matching callback functions and
+   * creates callbacks for module autoloading based on the routing.
+   *
+   * @private
+   */
+  var bindRoutes = function() { 
+    // each callback has signature: value, key  (not key, value)
+    _.each(this.getRoutes(), function(route) {
+
+      // check if route is assigned to a module
+      var module = _.find(this.modules, function(module) {
+        return module.autoload === route.name;
+      });
+
+      if(module) {
+        // if the route is assigned to a module look for all routes
+        // with route/ as prefix because then they have been defined
+        // by the module and therefore have to be assigned to the module as well
+        _.chain(this.getRoutes())
+          .filter(function(_route) {
+            return _route.route.match( new RegExp('^' + route.route + '\/'));
+          })
+          // (route doesnt match route/)
+          // => add route to the set of routes
+          .union([route])
+          .each(function(_route) {
+
+            this.router.on('route:' + _route.name, function() {
+              this.loadModule(module.instance);
+            }, this);
+
+          }, this);
+
+      } else {
+        if(this[route.name]) {
+          this.router.on('route:' + route.name, this[route.name], this);
+        }
+      }
+
+    }, this);
+  };
+
+  return exports;
+});
+
+/**
+ * A module that provides a Router constructor.
+ *
+ * @module ginseng/router
+ * @require backbone
+ */
+define('ginseng/router',[
+  'backbone',
+  'underscore'
+], function(
+  Backbone,
+  _
+) {
+  
+
+  /**
+   * Creates a router with given options.
+   * This constructor extends Backbone.Router.
+   *
+   * @constructor
+   *
+   * @param {object} [options] - options hash with router options
+   */
+  var exports = Backbone.Router.extend({
+
+    constructor: function() {
+      this.routes = []; 
+    },
+
+    route: function(route, routeName, create) {
+      // default arguments
+      create = ( create === undefined ) ? true : create;
+
+      // argument validation
+      if(this.hasRoute(routeName)) {
+        throw new Error('route with name "' + routeName + '" is already defined');
+      }
+      
+      this.routes.push({
+        route: route,
+        name: routeName
+      });
+  
+      if(create) {
+        Backbone.Router.prototype.route.call(this, route, routeName); 
+      }
+
+      return this;
+    },
+    
+    hasRoute: function(routeName) {
+      return _.any(this.routes, function(route) {
+        return route.name === routeName;
+      });
+    },
+
+    getRoute: function(routeName) {
+      var route = _.find(this.routes, function(route) {
+        return route.name === routeName;
+      });
+
+      return (route) ? route.route : route;
+    },
+
+    start: function() {
+     if(!Backbone.history) return;
+     
+     Backbone.history.start({ pushState: true });
+    },
+
+    stop: function() {
+      if(!Backbone.history) return;
+
+      Backbone.history.stop();
+    }
+ 
+  });
+
+  return exports;
+});
+
+/**
+ * A module that provides a sandbox constructor
+ *
+ * @module ginseng/sandbox
+ *
+ * @requires underscore
+ * @requires ginseng/mixins/mixable
+ * @requires ginseng/mixins/extendable
+ */
+define('ginseng/sandbox',[
+  'underscore',
+  'ginseng/mixins/mixable',
+  'ginseng/mixins/extendable'
+], function(
+  _,
+  Mixable,
+  Extendable
+) {
+  
+
+  /**
+   * Creates a sandbox instance
+   *
+   * @constructor
+   *
+   * @param {ginseng/core} core - core instance
+   */
+  var exports = function(core) {
+    this.core = core; 
+  };
+
+  _.extend(exports.prototype, Mixable, {
+
+    /**
+     * Wrapper function for {@link module:ginseng/core#moduleFactory}.
+     * This function is not intended to be used directly. It will be used
+     * by {@link module:ginseng/module#moduleFactory} to allow modules to
+     * create modules via the core.
+     *
+     * @instance
+     *
+     * @param {function} moduleCtor - module constructor
+     * @param {object} moduleOptions - object hash with module options
+     *
+     * @returns {moduleCtor} an instance of moduleCtor
+     */
+    moduleFactory: function(moduleCtor, moduleOptions) {
+      return this.core.moduleFactory(moduleCtor, moduleOptions);
+    },
+
+    /**
+     * Getter function for the core router.
+     * @instance
+     *
+     * @returns {ginseng/router} core router
+     */
+    getRouter: function() {
+      return this.core.router;
+    }
+
+  });
+
+  _.extend(exports, Extendable);
+
+  return exports;
+});
+
+/**
+ * A module that provides a core constructor
+ *
+ * @module ginseng/core
+ * @extends module:ginseng/modular_base
+ *
+ * @requires underscore
+ * @requires ginseng/modular_base
+ * @requires ginseng/router
+ * @requires ginseng/mixins/mixable
+ */
+define('ginseng/core',[
+  'underscore',
+  './modular_base',
+  './router',
+  './sandbox',
+  './mixins/mixable'
+], function(
+  _,
+  ModularBase,
+  Router,
+  Sandbox,
+  Mixable
+) {
+  
+
+  /**
+   * Creates a core with the given options
+   *
+   * @constructor
+   */
+  var exports = ModularBase.extend({
+  
+    /**
+     * Constructor function
+     * @instance
+     *
+     * @param {object} [options] - object hash with core options
+     */
+    constructor: function(options) {
+      // default arguments
+      if(!options) options = {};
+
+      // a core always has a router
+      this.router = new Router();
+      this.extensions = [];
+      this.Sandbox = Sandbox.extend();
+
+      // invoke ModularBase ctor with given options
+      ModularBase.call(this, options);
+    },
+
+    /**
+     * Adds a new module instance from the given module constructor
+     * with the given options to the core. This function overwrites
+     * {@link module:ginseng/modular_base#addModule}.
+     * Before calling super, it checks whether or not the autoload
+     * parameter is a string and starts with '/'. If it does, then
+     * it registers a new route on #router from the given autoload
+     * parameter and forwards to super with the name of the created route.
+     *
+     * The reason for this is to autoload modules based on a root url
+     * without having to hard-code the url into the client-side routing.
+     *
+     * @instance
+     *
+     * @param {function} moduleCtor - module constructor
+     * @param {object} - moduleOptions - object hash with module options
+     * @param {boolean/string} [autoload=true] - true, false, route name
+     *    or url starting with /
+     *
+     * @returns {moduleCtor} instance of the added module
+     */
+    addModule: function(moduleCtor, moduleOptions, autoload) {
+      var route, routeName;
+
+      // when autoload is root path (starts with /)
+      if(_.isString(autoload) && autoload.indexOf('/') === 0) {
+        // remove leading / because backbone routes start without /
+        route = autoload.slice(1);
+        // replace / in route with _ to obtain a valid route name
+        routeName = route.replace(/\//g, '_');
+        
+        // create route
+        this.router.route(route, routeName);
+
+        // set autoload to routeName
+        autoload = routeName;
+      }
+
+      return ModularBase.prototype.addModule.call(this, moduleCtor, moduleOptions, autoload);
+    },
+
+
+    /**
+     * Returns a new module instance from the given module constructor
+     * with a new #Sandbox instance and the given options. This function
+     * will be used by @link{module:ginseng/modular_base#addModule}.
+     *
+     * @instance
+     *
+     * @params {function} moduleCtor - module constructor
+     * @params {object} moduleOptions - object hash with module options
+     *
+     * @returns {moduleCtor} an instance of the given moduleCtor
+     */
+    moduleFactory: function(moduleCtor, moduleOptions) {
+      var F = function() {},
+          instance, module, args, sandbox;
+
+      // create instance of the module without calling the constructor function
+      F.prototype = moduleCtor.prototype;
+      instance = new F();
+
+      sandbox = this.sandboxFactory();
+
+      // apply constructor function to the created instance
+      // maybe the constructor returns interface with public functions
+      // => the return value will be our module.
+      module = moduleCtor.call(instance, sandbox, moduleOptions) || instance;
+
+      return module;
+    },
+
+
+    /**
+     * Returns a new sandbox instance.
+     * @instance
+     *  
+     * @returns {ginseng/sandbox} a new sandbox instance
+     */
+    sandboxFactory: function() {
+      return new this.Sandbox(this);
+      //return new (Sandbox.extend(SandboxExtensions))(this);
+    },
+
+    /**
+     * Adds given extension to the core
+     *
+     * @param {ginseng/extension} extensionCtor - extension constructor function
+     */
+    addExtension: function(extensionCtor) {
+      var F = function() {},
+          extension;
+
+      // create instance of given extensionCtor via intermediate constructor
+      F.prototype = extensionCtor.prototype;
+      extension = new F();
+
+      // invoke extensionCtor constructor function for the created instance
+      // with core instance (this) as argument. When the ctor function
+      // returns an interface, then this is our extension
+      extension = extensionCtor.call(extension, this) || extension;
+
+      // when extension has #Sandbox property we mixin the sandbox functions
+      // into core's sandbox prototype
+      if(extension.Sandbox) {
+        this.Sandbox.prototype.mixin(extension.Sandbox);
+      }
+
+      this.extensions.push(extension);
+    }
+
+  });
+
+  return exports;
+});
+
+/**
+ * A module that provides a core extension constructor
+ *
+ * @module ginseng/extension
+ *
+ * @requires ginseng/mixins/extendable
+ */
+define('ginseng/extension',[
+  'underscore',
+  './mixins/extendable'  
+], function(
+  _,
+  Extendable  
+) {
+  
+
+  /**
+   * Core extension constructor
+   *
+   * @constructor
+   *
+   * @param {ginseng/core} core - core to extend
+   */
+  var exports = function(core) { 
+    this.core = core;
+    this.initialize.call(this);
+  };
+
+  // make extension extendable
+  exports.extend = Extendable.extend;
+
+  _.extend(exports.prototype, {
+  
+    /**
+     * Placeholder function which should be overwritten
+     * by concrete extension.
+     */
+    initialize: function() {}
+
+  });
+  
+  return exports; 
+});
+
+define('ginseng/module_router',[
+  'underscore',
+  'backbone'
+], function(_, Backbone) {
+  
+
+  var ModuleRouter = function(options) {
+    // default arguments
+    if(!options) options = {};
+
+    this._extractOptions(options);
+   
+    // create empty routes array
+    this.routes = [];
+  };
+
+  _.extend(ModuleRouter.prototype, Backbone.Events, {
+
+    _extractOptions: function(options) {
+      // argument validation
+      if(!options.router) {
+        throw new Error('options argument must have router property'); 
+      }
+      if(!options.baseRoute) {
+        throw new Error('options argument must have baseRoute property');
+      }
+      if(!options.baseRouteName) {
+        throw new Error('options argument must have baseRouteName property');
+      }
+
+      this.router = options.router;
+      this.baseRoute = options.baseRoute;
+      this.baseRouteName = options.baseRouteName;
+    },
+
+    route: function(route, routeName, create) {
+      // default arguments
+      create = ( create === undefined ) ? true : create;
+
+      this.routes.push({
+        route: route,
+        name: routeName
+      });
+      
+      // when route is '' => we don't need to create it again
+      // because it must have been created by parent module
+      if(create && route) {
+        route = this.baseRoute + '/' + route;
+        routeName = this.baseRouteName + '_' + routeName;
+
+        this.router.route(route, routeName);
+      }
+
+      return this;
+    },
+
+    hasRoute: function(routeName) {
+      return _.any(this.routes, function(route) {
+        return route.name === routeName;
+      });
+    },
+
+    getRoute: function(routeName) {
+      var route = _.find(this.routes, function(route) {
+        return route.name === routeName;
+      });
+
+      return (route) ? route.route : route;
+    },
+
+    navigate: function(fragment, options) {
+      fragment = this.baseRoute + '/' + fragment;
+      this.router.navigate(fragment, options);
+    },
+
+    start: function() {
+      _.each(this.routes, function(route) {
+        this.router.on('route:' + this.baseRouteName + '_' + route.name, function() {
+          this.trigger('route:' + route.name);
+        }, this);
+      }, this);
+
+      this._loadFragment(this._getCurrentUrlFragment());
+    },
+
+    stop: function() {
+      // remove all callbacks from this router instance
+      this.router.off(null, null, this);
+    },
+
+    /*
+     * Returns the current absolute url fragment
+     */
+    _getCurrentUrlFragment: function() {
+      return Backbone.history.fragment;
+    },
+
+    /*
+     * Checks absolute url fragment and triggers route event
+     * when match with relative routes has been found.
+     */
+    _loadFragment: function(fragment) {
+      var matched = _.any(this.routes, function(route) {
+        var fragmentRegExp = new RegExp(fragment + '$');
+        // when route.route is empty => it's the root route
+        var absoluteRoute = route.route ? this.baseRoute + '/' + route.route : this.baseRoute;
+        if(fragmentRegExp.test( absoluteRoute )) {
+          this.trigger('route:' + route.name);
+          return true;
+        }
+      }, this);
+
+      return matched;      
+    }
+
+  });
+
+  return ModuleRouter;
+
+});
+
+/**
+ * A module that provides a module constructor
+ *
+ * @module ginseng/module
+ * @extends module:ginseng/modular_base
+ *
+ * @requires underscore
+ * @requires backbone
+ * @requires ginseng/modular_base
+ * @requires ginseng/module_router
+ */
+define('ginseng/module',[
+  'underscore',
+  'backbone',
+  './modular_base',
+  './module_router'
+], function(
+  _, Backbone,
+  ModularBase, ModuleRouter
+) {
+  
+
+  /**
+   * Creates a module with the given sandbox and options.
+   *
+   * @constructor
+   */
+  var exports = ModularBase.extend({
+    
+    /**
+     * Constructor function
+     *
+     * @param {object} sandbox - sandbox which will be used by the module
+     * @param {object} [options] - object hash with module options
+     */
+    constructor: function(sandbox, options) {
+      // default arguments
+      if(!options) options = {};
+      
+      // assign instance variables 
+      this.sandbox = sandbox;
+      extractOptions.call(this, options);
+      
+      // create router only if module is routable
+      if(this.isRoutable()) {
+        this.router = new ModuleRouter({
+          router: this.sandbox.getRouter(),
+          baseRoute: this.baseRoute,
+          baseRouteName: this.baseRouteName
+        });
+      } else if (this.routes) {
+        // throw error when routes object is defined
+        // but the module is not routable
+        throw new Error('This module is not allowed to have routes');
+      }
+
+      // invoke ModularBase ctor
+      ModularBase.call(this, options);
+    },
+    
+
+    /**
+     * Returns a new module instance from the given module constructor
+     * with the given options. It forwards the call to a moduleFactory
+     * provided by the sandbox.
+     *
+     * @instance
+     *
+     * @param {function} moduleCtor - module constructor function
+     * @param {object} [moduleOptions] - object hash with module options 
+     *
+     * @returns {moduleCtor} an instance of the given moduleCtor 
+     */ 
+    moduleFactory: function(moduleCtor, moduleOptions) {
+      return this.sandbox.moduleFactory(moduleCtor, moduleOptions);
+    },
+
+
+    /**
+     * Determines whether the module is routable or not.
+     * A module is routable when it's parent created it with a baseRoute
+     * and a baseRouteName.
+     *
+     * @instance
+     *
+     * @returns {boolean} true when the module is routable, false otherwise
+     */
+    isRoutable: function() {
+      return _.has(this, 'baseRoute') && _.has(this, 'baseRouteName');
+    }
+
+  });
+
+  // ######################
+  // ## Helper functions ##
+  // ######################
+
+  /**
+   * Checks if the given options object has predefined
+   * options and assigns these options as instance variables.
+   *
+   * This is a helper function and must be called in the context
+   * of a module: extractOptions.call(this, options).
+   *
+   * @param {object} options - object hash with module options
+   */  
+  var extractOptions = function(options) {
+    var optionsToExtract = [ 'el', 'baseRoute', 'baseRouteName' ];
+   
+    for (var i = 0, l = optionsToExtract.length; i < l; i++) {
+      var attr = optionsToExtract[i];
+      if (options[attr]) {
+        this[attr] = options[attr];
+      }
+    }
+  };
+
+  return exports;
+});
+
+/**
+ * A module that provides a Model constructor.
+ *
+ * @module ginseng/model
+ * @requires backbone
+ */
+define('ginseng/model',['backbone'], function(Backbone) {
+  
+
+  /**
+   * Creates a model with given attributes and options.
+   * This constructor extends Backbone.Model.
+   *
+   * @constructor
+   *
+   * @param {object} [attributes] - object hash with model attributes
+   * @param {object} [options] - object hash with model options
+   */
+  var exports = Backbone.Model.extend();
+
+  return exports;
+});
+
+/**
+ * A module that provides a View constructor.
+ *
+ * @module ginseng/view
+ * @requires backbone
+ */
+define('ginseng/view',['backbone'], function(Backbone) {
+  
+  
+  /**
+   * Creates a view with the given options.
+   * This constructor extends Backbone.View.
+   *
+   * @constructor
+   *
+   * @param {object} [options] - object hash with view options
+   */
+  var exports = Backbone.View.extend();
+
+  return exports;
+});
+
+/**
+ * A module that provides a Collection constructor.
+ *
+ * @module ginseng/collection 
+ * @requires backbone
+ */
+define('ginseng/collection',['backbone'], function(Backbone) {
+  
+
+  /**
+   * Creates a collection with the given models and options.
+   * This constructor extends Backbone.Collection.
+   *
+   * @constructor
+   *
+   * @param {array} [models] - initial array of models
+   * @param {object} [options] - object hash with collection options
+   */
+  var exports = Backbone.Collection.extend();
+
+  return exports;
+});
 
 /**
  * ginseng 0.1
  * (c) 2012, Julian Maicher (University of Paderborn)
  */
+define('ginseng',[
+  'underscore',
+  'ginseng/core',
+  'ginseng/extension',
+  'ginseng/module',
+  'ginseng/model',
+  'ginseng/view',
+  'ginseng/collection'
+], function(
+  Underscore,
+  Core,
+  Extension,
+  Module,
+  Model,
+  View,
+  Collection
+) {
 
-(function(a){var b,c,d;(function(a){function l(a,b){var c=b&&b.split("/"),d=g.map,e=d&&d["*"]||{},f,h,i,j,k,l,m;if(a&&a.charAt(0)==="."&&b){c=c.slice(0,c.length-1),a=c.concat(a.split("/"));for(k=0;m=a[k];k++)if(m===".")a.splice(k,1),k-=1;else if(m===".."){if(k===1&&(a[2]===".."||a[0]===".."))return!0;k>0&&(a.splice(k-1,2),k-=2)}a=a.join("/")}if((c||e)&&d){f=a.split("/");for(k=f.length;k>0;k-=1){h=f.slice(0,k).join("/");if(c)for(l=c.length;l>0;l-=1){i=d[c.slice(0,l).join("/")];if(i){i=i[h];if(i){j=i;break}}}j=j||e[h];if(j){f.splice(0,k,j),a=f.join("/");break}}}return a}function m(b,c){return function(){return k.apply(a,i.call(arguments,0).concat([b,c]))}}function n(a){return function(b){return l(b,a)}}function o(a){return function(b){e[a]=b}}function p(b){if(f.hasOwnProperty(b)){var c=f[b];delete f[b],h[b]=!0,j.apply(a,c)}if(!e.hasOwnProperty(b))throw new Error("No "+b);return e[b]}function q(a,b){var c,d,e=a.indexOf("!");return e!==-1?(c=l(a.slice(0,e),b),a=a.slice(e+1),d=p(c),d&&d.normalize?a=d.normalize(a,n(b)):a=l(a,b)):a=l(a,b),{f:c?c+"!"+a:a,n:a,p:d}}function r(a){return function(){return g&&g.config&&g.config[a]||{}}}var e={},f={},g={},h={},i=[].slice,j,k;j=function(b,c,d,g){var i=[],j,k,l,n,s,t;g=g||b;if(typeof d=="function"){c=!c.length&&d.length?["require","exports","module"]:c;for(t=0;t<c.length;t++){s=q(c[t],g),l=s.f;if(l==="require")i[t]=m(b);else if(l==="exports")i[t]=e[b]={},j=!0;else if(l==="module")k=i[t]={id:b,uri:"",exports:e[b],config:r(b)};else if(e.hasOwnProperty(l)||f.hasOwnProperty(l))i[t]=p(l);else if(s.p)s.p.load(s.n,m(g,!0),o(l),{}),i[t]=e[l];else if(!h[l])throw new Error(b+" missing "+l)}n=d.apply(e[b],i);if(b)if(k&&k.exports!==a&&k.exports!==e[b])e[b]=k.exports;else if(n!==a||!j)e[b]=n}else b&&(e[b]=d)},b=c=k=function(b,c,d,e){return typeof b=="string"?p(q(b,c).f):(b.splice||(g=b,c.splice?(b=c,c=d,d=null):b=a),c=c||function(){},e?j(a,b,c,d):setTimeout(function(){j(a,b,c,d)},15),k)},k.config=function(a){return g=a,k},d=function(a,b,c){b.splice||(c=b,b=[]),f[a]=[a,b,c]},d.amd={jQuery:!0}})(),d("../vendor/almond",function(){}),function(){function a(b,c,d){if(b===c)return 0!==b||1/b==1/c;if(null==b||null==c)return b===c;b._chain&&(b=b._wrapped),c._chain&&(c=c._wrapped);if(b.isEqual&&w.isFunction(b.isEqual))return b.isEqual(c);if(c.isEqual&&w.isFunction(c.isEqual))return c.isEqual(b);var e=j.call(b);if(e!=j.call(c))return!1;switch(e){case"[object String]":return b==""+c;case"[object Number]":return b!=+b?c!=+c:0==b?1/b==1/c:b==+c;case"[object Date]":case"[object Boolean]":return+b==+c;case"[object RegExp]":return b.source==c.source&&b.global==c.global&&b.multiline==c.multiline&&b.ignoreCase==c.ignoreCase}if("object"!=typeof b||"object"!=typeof c)return!1;for(var f=d.length;f--;)if(d[f]==b)return!0;d.push(b);var f=0,g=!0;if("[object Array]"==e){if(f=b.length,g=f==c.length)for(;f--&&(g=f in b==f in c&&a(b[f],c[f],d)););}else{if("constructor"in b!="constructor"in c||b.constructor!=c.constructor)return!1;for(var h in b)if(w.has(b,h)&&(f++,!(g=w.has(c,h)&&a(b[h],c[h],d))))break;if(g){for(h in c)if(w.has(c,h)&&!(f--))break;g=!f}}return d.pop(),g}var b=this,c=b._,e={},f=Array.prototype,g=Object.prototype,h=f.slice,i=f.unshift,j=g.toString,k=g.hasOwnProperty,l=f.forEach,m=f.map,n=f.reduce,o=f.reduceRight,p=f.filter,q=f.every,r=f.some,s=f.indexOf,t=f.lastIndexOf,g=Array.isArray,u=Object.keys,v=Function.prototype.bind,w=function(a){return new D(a)};"undefined"!=typeof exports?("undefined"!=typeof module&&module.exports&&(exports=module.exports=w),exports._=w):b._=w,w.VERSION="1.3.1";var x=w.each=w.forEach=function(a,b,c){if(a!=null)if(l&&a.forEach===l)a.forEach(b,c);else if(a.length===+a.length){for(var d=0,f=a.length;d<f;d++)if(d in a&&b.call(c,a[d],d,a)===e)break}else for(d in a)if(w.has(a,d)&&b.call(c,a[d],d,a)===e)break};w.map=w.collect=function(a,b,c){var d=[];return a==null?d:m&&a.map===m?a.map(b,c):(x(a,function(a,e,f){d[d.length]=b.call(c,a,e,f)}),a.length===+a.length&&(d.length=a.length),d)},w.reduce=w.foldl=w.inject=function(a,b,c,d){var e=arguments.length>2;a==null&&(a=[]);if(n&&a.reduce===n)return d&&(b=w.bind(b,d)),e?a.reduce(b,c):a.reduce(b);x(a,function(a,f,g){e?c=b.call(d,c,a,f,g):(c=a,e=!0)});if(!e)throw new TypeError("Reduce of empty array with no initial value");return c},w.reduceRight=w.foldr=function(a,b,c,d){var e=arguments.length>2;a==null&&(a=[]);if(o&&a.reduceRight===o)return d&&(b=w.bind(b,d)),e?a.reduceRight(b,c):a.reduceRight(b);var f=w.toArray(a).reverse();return d&&!e&&(b=w.bind(b,d)),e?w.reduce(f,b,c,d):w.reduce(f,b)},w.find=w.detect=function(a,b,c){var d;return y(a,function(a,e,f){if(b.call(c,a,e,f))return d=a,!0}),d},w.filter=w.select=function(a,b,c){var d=[];return a==null?d:p&&a.filter===p?a.filter(b,c):(x(a,function(a,e,f){b.call(c,a,e,f)&&(d[d.length]=a)}),d)},w.reject=function(a,b,c){var d=[];return a==null?d:(x(a,function(a,e,f){b.call(c,a,e,f)||(d[d.length]=a)}),d)},w.every=w.all=function(a,b,c){var d=!0;return a==null?d:q&&a.every===q?a.every(b,c):(x(a,function(a,f,g){if(!(d=d&&b.call(c,a,f,g)))return e}),d)};var y=w.some=w.any=function(a,b,c){b||(b=w.identity);var d=!1;return a==null?d:r&&a.some===r?a.some(b,c):(x(a,function(a,f,g){if(d||(d=b.call(c,a,f,g)))return e}),!!d)};w.include=w.contains=function(a,b){var c=!1;return a==null?c:s&&a.indexOf===s?a.indexOf(b)!=-1:c=y(a,function(a){return a===b})},w.invoke=function(a,b){var c=h.call(arguments,2);return w.map(a,function(a){return(w.isFunction(b)?b||a:a[b]).apply(a,c)})},w.pluck=function(a,b){return w.map(a,function(a){return a[b]})},w.max=function(a,b,c){if(!b&&w.isArray(a))return Math.max.apply(Math,a);if(!b&&w.isEmpty(a))return-Infinity;var d={computed:-Infinity};return x(a,function(a,e,f){e=b?b.call(c,a,e,f):a,e>=d.computed&&(d={value:a,computed:e})}),d.value},w.min=function(a,b,c){if(!b&&w.isArray(a))return Math.min.apply(Math,a);if(!b&&w.isEmpty(a))return Infinity;var d={computed:Infinity};return x(a,function(a,e,f){e=b?b.call(c,a,e,f):a,e<d.computed&&(d={value:a,computed:e})}),d.value},w.shuffle=function(a){var b=[],c;return x(a,function(a,d){d==0?b[0]=a:(c=Math.floor(Math.random()*(d+1)),b[d]=b[c],b[c]=a)}),b},w.sortBy=function(a,b,c){return w.pluck(w.map(a,function(a,d,e){return{value:a,criteria:b.call(c,a,d,e)}}).sort(function(a,b){var c=a.criteria,d=b.criteria;return c<d?-1:c>d?1:0}),"value")},w.groupBy=function(a,b){var c={},d=w.isFunction(b)?b:function(a){return a[b]};return x(a,function(a,b){var e=d(a,b);(c[e]||(c[e]=[])).push(a)}),c},w.sortedIndex=function(a,b,c){c||(c=w.identity);for(var d=0,e=a.length;d<e;){var f=d+e>>1;c(a[f])<c(b)?d=f+1:e=f}return d},w.toArray=function(a){return a?a.toArray?a.toArray():w.isArray(a)||w.isArguments(a)?h.call(a):w.values(a):[]},w.size=function(a){return w.toArray(a).length},w.first=w.head=function(a,b,c){return b!=null&&!c?h.call(a,0,b):a[0]},w.initial=function(a,b,c){return h.call(a,0,a.length-(b==null||c?1:b))},w.last=function(a,b,c){return b!=null&&!c?h.call(a,Math.max(a.length-b,0)):a[a.length-1]},w.rest=w.tail=function(a,b,c){return h.call(a,b==null||c?1:b)},w.compact=function(a){return w.filter(a,function(a){return!!a})},w.flatten=function(a,b){return w.reduce(a,function(a,c){return w.isArray(c)?a.concat(b?c:w.flatten(c)):(a[a.length]=c,a)},[])},w.without=function(a){return w.difference(a,h.call(arguments,1))},w.uniq=w.unique=function(a,b,c){var c=c?w.map(a,c):a,d=[];return w.reduce(c,function(c,e,f){if(0==f||(b===!0?w.last(c)!=e:!w.include(c,e)))c[c.length]=e,d[d.length]=a[f];return c},[]),d},w.union=function(){return w.uniq(w.flatten(arguments,!0))},w.intersection=w.intersect=function(a){var b=h.call(arguments,1);return w.filter(w.uniq(a),function(a){return w.every(b,function(b){return w.indexOf(b,a)>=0})})},w.difference=function(a){var b=w.flatten(h.call(arguments,1));return w.filter(a,function(a){return!w.include(b,a)})},w.zip=function(){for(var a=h.call(arguments),b=w.max(w.pluck(a,"length")),c=Array(b),d=0;d<b;d++)c[d]=w.pluck(a,""+d);return c},w.indexOf=function(a,b,c){if(a==null)return-1;var d;if(c)return c=w.sortedIndex(a,b),a[c]===b?c:-1;if(s&&a.indexOf===s)return a.indexOf(b);c=0;for(d=a.length;c<d;c++)if(c in a&&a[c]===b)return c;return-1},w.lastIndexOf=function(a,b){if(a==null)return-1;if(t&&a.lastIndexOf===t)return a.lastIndexOf(b);for(var c=a.length;c--;)if(c in a&&a[c]===b)return c;return-1},w.range=function(a,b,c){arguments.length<=1&&(b=a||0,a=0);for(var c=arguments[2]||1,d=Math.max(Math.ceil((b-a)/c),0),e=0,f=Array(d);e<d;)f[e++]=a,a+=c;return f};var z=function(){};w.bind=function(a,b){var c,d;if(a.bind===v&&v)return v.apply(a,h.call(arguments,1));if(!w.isFunction(a))throw new TypeError;return d=h.call(arguments,2),c=function(){if(this instanceof c){z.prototype=a.prototype;var e=new z,f=a.apply(e,d.concat(h.call(arguments)));return Object(f)===f?f:e}return a.apply(b,d.concat(h.call(arguments)))}},w.bindAll=function(a){var b=h.call(arguments,1);return b.length==0&&(b=w.functions(a)),x(b,function(b){a[b]=w.bind(a[b],a)}),a},w.memoize=function(a,b){var c={};return b||(b=w.identity),function(){var d=b.apply(this,arguments);return w.has(c,d)?c[d]:c[d]=a.apply(this,arguments)}},w.delay=function(a,b){var c=h.call(arguments,2);return setTimeout(function(){return a.apply(a,c)},b)},w.defer=function(a){return w.delay.apply(w,[a,1].concat(h.call(arguments,1)))},w.throttle=function(a,b){var c,d,e,f,g,h=w.debounce(function(){g=f=!1},b);return function(){c=this,d=arguments,e||(e=setTimeout(function(){e=null,g&&a.apply(c,d),h()},b)),f?g=!0:a.apply(c,d),h(),f=!0}},w.debounce=function(a,b){var c;return function(){var d=this,e=arguments;clearTimeout(c),c=setTimeout(function(){c=null,a.apply(d,e)},b)}},w.once=function(a){var b=!1,c;return function(){return b?c:(b=!0,c=a.apply(this,arguments))}},w.wrap=function(a,b){return function(){var c=[a].concat(h.call(arguments,0));return b.apply(this,c)}},w.compose=function(){var a=arguments;return function(){for(var b=arguments,c=a.length-1;c>=0;c--)b=[a[c].apply(this,b)];return b[0]}},w.after=function(a,b){return a<=0?b():function(){if(--a<1)return b.apply(this,arguments)}},w.keys=u||function(a){if(a!==Object(a))throw new TypeError("Invalid object");var b=[],c;for(c in a)w.has(a,c)&&(b[b.length]=c);return b},w.values=function(a){return w.map(a,w.identity)},w.functions=w.methods=function(a){var b=[],c;for(c in a)w.isFunction(a[c])&&b.push(c);return b.sort()},w.extend=function(a){return x(h.call(arguments,1),function(b){for(var c in b)a[c]=b[c]}),a},w.defaults=function(a){return x(h.call(arguments,1),function(b){for(var c in b)a[c]==null&&(a[c]=b[c])}),a},w.clone=function(a){return w.isObject(a)?w.isArray(a)?a.slice():w.extend({},a):a},w.tap=function(a,b){return b(a),a},w.isEqual=function(b,c){return a(b,c,[])},w.isEmpty=function(a){if(w.isArray(a)||w.isString(a))return a.length===0;for(var b in a)if(w.has(a,b))return!1;return!0},w.isElement=function(a){return!!a&&a.nodeType==1},w.isArray=g||function(a){return j.call(a)=="[object Array]"},w.isObject=function(a){return a===Object(a)},w.isArguments=function(a){return j.call(a)=="[object Arguments]"},w.isArguments(arguments)||(w.isArguments=function(a){return!!a&&!!w.has(a,"callee")}),w.isFunction=function(a){return j.call(a)=="[object Function]"},w.isString=function(a){return j.call(a)=="[object String]"},w.isNumber=function(a){return j.call(a)=="[object Number]"},w.isNaN=function(a){return a!==a},w.isBoolean=function(a){return a===!0||a===!1||j.call(a)=="[object Boolean]"},w.isDate=function(a){return j.call(a)=="[object Date]"},w.isRegExp=function(a){return j.call(a)=="[object RegExp]"},w.isNull=function(a){return a===null},w.isUndefined=function(a){return a===void 0},w.has=function(a,b){return k.call(a,b)},w.noConflict=function(){return b._=c,this},w.identity=function(a){return a},w.times=function(a,b,c){for(var d=0;d<a;d++)b.call(c,d)},w.escape=function(a){return(""+a).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#x27;").replace(/\//g,"&#x2F;")},w.mixin=function(a){x(w.functions(a),function(b){F(b,w[b]=a[b])})};var A=0;w.uniqueId=function(a){var b=A++;return a?a+b:b},w.templateSettings={evaluate:/<%([\s\S]+?)%>/g,interpolate:/<%=([\s\S]+?)%>/g,escape:/<%-([\s\S]+?)%>/g};var B=/.^/,C=function(a){return a.replace(/\\\\/g,"\\").replace(/\\'/g,"'")};w.template=function(a,b){var c=w.templateSettings,c="var __p=[],print=function(){__p.push.apply(__p,arguments);};with(obj||{}){__p.push('"+a.replace(/\\/g,"\\\\").replace(/'/g,"\\'").replace(c.escape||B,function(a,b){return"',_.escape("+C(b)+"),'"}).replace(c.interpolate||B,function(a,b){return"',"+C(b)+",'"}).replace(c.evaluate||B,function(a,b){return"');"+C(b).replace(/[\r\n\t]/g," ")+";__p.push('"}).replace(/\r/g,"\\r").replace(/\n/g,"\\n").replace(/\t/g,"\\t")+"');}return __p.join('');",d=new Function("obj","_",c);return b?d(b,w):function(a){return d.call(this,a,w)}},w.chain=function(a){return w(a).chain()};var D=function(a){this._wrapped=a};w.prototype=D.prototype;var E=function(a,b){return b?w(a).chain():a},F=function(a,b){D.prototype[a]=function(){var a=h.call(arguments);return i.call(a,this._wrapped),E(b.apply(w,a),this._chain)}};w.mixin(w),x("pop,push,reverse,shift,sort,splice,unshift".split(","),function(a){var b=f[a];D.prototype[a]=function(){var c=this._wrapped;b.apply(c,arguments);var d=c.length;return(a=="shift"||a=="splice")&&d===0&&delete c[0],E(c,this._chain)}}),x(["concat","join","slice"],function(a){var b=f[a];D.prototype[a]=function(){return E(b.apply(this._wrapped,arguments),this._chain)}}),D.prototype.chain=function(){return this._chain=!0,this},D.prototype.value=function(){return this._wrapped},"function"==typeof d&&d.amd&&d("underscore",[],function(){return w})}.call(this),d("jquery",[],function(){return jQuery}),function(a,b){"undefined"!=typeof exports?b(a,exports,c("underscore")):"function"==typeof d&&d.amd?d("backbone",["underscore","jquery","exports"],function(c,d,e){a.Backbone=b(a,e,c,d)}):a.Backbone=b(a,{},a._,a.jQuery||a.Zepto||a.ender)}(this,function(a,b,c,d){var e=a.Backbone,f=Array.prototype.slice,g=Array.prototype.splice;b.VERSION="0.9.2",b.setDomLibrary=function(a){d=a},b.noConflict=function(){return a.Backbone=e,b},b.emulateHTTP=!1,b.emulateJSON=!1;var h=/\s+/,i=b.Events={on:function(a,b,c){var d,e,f,g,i;if(!b)return this;a=a.split(h);for(d=this._callbacks||(this._callbacks={});e=a.shift();)f=(i=d[e])?i.tail:{},f.next=g={},f.context=c,f.callback=b,d[e]={tail:g,next:i?i.next:f};return this},off:function(a,b,d){var e,f,g,i,j,k;if(f=this._callbacks){if(!a&&!b&&!d)return delete this._callbacks,this;for(a=a?a.split(h):c.keys(f);e=a.shift();)if(g=f[e],delete f[e],g&&(b||d))for(i=g.tail;(g=g.next)!==i;)(j=g.callback,k=g.context,b&&j!==b||d&&k!==d)&&this.on(e,j,k);return this}},trigger:function(a){var b,c,d,e,g,i;if(!(d=this._callbacks))return this;g=d.all,a=a.split(h);for(i=f.call(arguments,1);b=a.shift();){if(c=d[b])for(e=c.tail;(c=c.next)!==e;)c.callback.apply(c.context||this,i);if(c=g){e=c.tail;for(b=[b].concat(i);(c=c.next)!==e;)c.callback.apply(c.context||this,b)}}return this}};i.bind=i.on,i.unbind=i.off;var j=b.Model=function(a,b){var d;a||(a={}),b&&b.parse&&(a=this.parse(a));if(d=y(this,"defaults"))a=c.extend({},d,a);b&&b.collection&&(this.collection=b.collection),this.attributes={},this._escapedAttributes={},this.cid=c.uniqueId("c"),this.changed={},this._silent={},this._pending={},this.set(a,{silent:!0}),this.changed={},this._silent={},this._pending={},this._previousAttributes=c.clone(this.attributes),this.initialize.apply(this,arguments)};c.extend(j.prototype,i,{changed:null,_silent:null,_pending:null,idAttribute:"id",initialize:function(){},toJSON:function(){return c.clone(this.attributes)},get:function(a){return this.attributes[a]},escape:function(a){var b;return(b=this._escapedAttributes[a])?b:(b=this.get(a),this._escapedAttributes[a]=c.escape(null==b?"":""+b))},has:function(a){return null!=this.get(a)},set:function(a,b,d){var e,f;c.isObject(a)||null==a?(e=a,d=b):(e={},e[a]=b),d||(d={});if(!e)return this;e instanceof j&&(e=e.attributes);if(d.unset)for(f in e)e[f]=void 0;if(!this._validate(e,d))return!1;this.idAttribute in e&&(this.id=e[this.idAttribute]);var b=d.changes={},g=this.attributes,h=this._escapedAttributes,i=this._previousAttributes||{};for(f in e){a=e[f];if(!c.isEqual(g[f],a)||d.unset&&c.has(g,f))delete h[f],(d.silent?this._silent:b)[f]=!0;d.unset?delete g[f]:g[f]=a,!c.isEqual(i[f],a)||c.has(g,f)!=c.has(i,f)?(this.changed[f]=a,d.silent||(this._pending[f]=!0)):(delete this.changed[f],delete this._pending[f])}return d.silent||this.change(d),this},unset:function(a,b){return(b||(b={})).unset=!0,this.set(a,null,b)},clear:function(a){return(a||(a={})).unset=!0,this.set(c.clone(this.attributes),a)},fetch:function(a){var a=a?c.clone(a):{},d=this,e=a.success;return a.success=function(b,c,f){if(!d.set(d.parse(b,f),a))return!1;e&&e(d,b)},a.error=b.wrapError(a.error,d,a),(this.sync||b.sync).call(this,"read",this,a)},save:function(a,d,e){var f,g;c.isObject(a)||null==a?(f=a,e=d):(f={},f[a]=d),e=e?c.clone(e):{};if(e.wait){if(!this._validate(f,e))return!1;g=c.clone(this.attributes)}a=c.extend({},e,{silent:!0});if(f&&!this.set(f,e.wait?a:e))return!1;var h=this,i=e.success;return e.success=function(a,b,d){b=h.parse(a,d),e.wait&&(delete e.wait,b=c.extend(f||{},b));if(!h.set(b,e))return!1;i?i(h,a):h.trigger("sync",h,a,e)},e.error=b.wrapError(e.error,h,e),d=this.isNew()?"create":"update",d=(this.sync||b.sync).call(this,d,this,e),e.wait&&this.set(g,a),d},destroy:function(a){var a=a?c.clone(a):{},d=this,e=a.success,f=function(){d.trigger("destroy",d,d.collection,a)};if(this.isNew())return f(),!1;a.success=function(b){a.wait&&f(),e?e(d,b):d.trigger("sync",d,b,a)},a.error=b.wrapError(a.error,d,a);var g=(this.sync||b.sync).call(this,"delete",this,a);return a.wait||f(),g},url:function(){var a=y(this,"urlRoot")||y(this.collection,"url")||z();return this.isNew()?a:a+("/"==a.charAt(a.length-1)?"":"/")+encodeURIComponent(this.id)},parse:function(a){return a},clone:function(){return new this.constructor(this.attributes)},isNew:function(){return null==this.id},change:function(a){a||(a={});var b=this._changing;this._changing=!0;for(var d in this._silent)this._pending[d]=!0;var e=c.extend({},a.changes,this._silent);this._silent={};for(d in e)this.trigger("change:"+d,this,this.get(d),a);if(b)return this;for(;!c.isEmpty(this._pending);){this._pending={},this.trigger("change",this,a);for(d in this.changed)!this._pending[d]&&!this._silent[d]&&delete this.changed[d];this._previousAttributes=c.clone(this.attributes)}return this._changing=!1,this},hasChanged:function(a){return arguments.length?c.has(this.changed,a):!c.isEmpty(this.changed)},changedAttributes:function(a){if(!a)return this.hasChanged()?c.clone(this.changed):!1;var b,d=!1,e=this._previousAttributes,f;for(f in a)c.isEqual(e[f],b=a[f])||((d||(d={}))[f]=b);return d},previous:function(a){return!arguments.length||!this._previousAttributes?null:this._previousAttributes[a]},previousAttributes:function(){return c.clone(this._previousAttributes)},isValid:function(){return!this.validate(this.attributes)},_validate:function(a,b){if(b.silent||!this.validate)return!0;var a=c.extend({},this.attributes,a),d=this.validate(a,b);return d?(b&&b.error?b.error(this,d,b):this.trigger("error",this,d,b),!1):!0}});var k=b.Collection=function(a,b){b||(b={}),b.model&&(this.model=b.model),b.comparator&&(this.comparator=b.comparator),this._reset(),this.initialize.apply(this,arguments),a&&this.reset(a,{silent:!0,parse:b.parse})};c.extend(k.prototype,i,{model:j,initialize:function(){},toJSON:function(a){return this.map(function(b){return b.toJSON(a)})},add:function(a,b){var d,e,f,h,i,j={},k={},l=[];b||(b={}),a=c.isArray(a)?a.slice():[a],d=0;for(e=a.length;d<e;d++){if(!(f=a[d]=this._prepareModel(a[d],b)))throw Error("Can't add an invalid model to a collection");h=f.cid,i=f.id,j[h]||this._byCid[h]||null!=i&&(k[i]||this._byId[i])?l.push(d):j[h]=k[i]=f}for(d=l.length;d--;)a.splice(l[d],1);d=0;for(e=a.length;d<e;d++)(f=a[d]).on("all",this._onModelEvent,this),this._byCid[f.cid]=f,null!=f.id&&(this._byId[f.id]=f);this.length+=e,g.apply(this.models,[null!=b.at?b.at:this.models.length,0].concat(a)),this.comparator&&this.sort({silent:!0});if(b.silent)return this;d=0;for(e=this.models.length;d<e;d++)j[(f=this.models[d]).cid]&&(b.index=d,f.trigger("add",f,this,b));return this},remove:function(a,b){var d,e,f,g;b||(b={}),a=c.isArray(a)?a.slice():[a],d=0;for(e=a.length;d<e;d++)if(g=this.getByCid(a[d])||this.get(a[d]))delete this._byId[g.id],delete this._byCid[g.cid],f=this.indexOf(g),this.models.splice(f,1),this.length--,b.silent||(b.index=f,g.trigger("remove",g,this,b)),this._removeReference(g);return this},push:function(a,b){return a=this._prepareModel(a,b),this.add(a,b),a},pop:function(a){var b=this.at(this.length-1);return this.remove(b,a),b},unshift:function(a,b){return a=this._prepareModel(a,b),this.add(a,c.extend({at:0},b)),a},shift:function(a){var b=this.at(0);return this.remove(b,a),b},get:function(a){return null==a?void 0:this._byId[null!=a.id?a.id:a]},getByCid:function(a){return a&&this._byCid[a.cid||a]},at:function(a){return this.models[a]},where:function(a){return c.isEmpty(a)?[]:this.filter(function(b){for(var c in a)if(a[c]!==b.get(c))return!1;return!0})},sort:function(a){a||(a={});if(!this.comparator)throw Error("Cannot sort a set without a comparator");var b=c.bind(this.comparator,this);return 1==this.comparator.length?this.models=this.sortBy(b):this.models.sort(b),a.silent||this.trigger("reset",this,a),this},pluck:function(a){return c.map(this.models,function(b){return b.get(a)})},reset:function(a,b){a||(a=[]),b||(b={});for(var d=0,e=this.models.length;d<e;d++)this._removeReference(this.models[d]);return this._reset(),this.add(a,c.extend({silent:!0},b)),b.silent||this.trigger("reset",this,b),this},fetch:function(a){a=a?c.clone(a):{},void 0===a.parse&&(a.parse=!0);var d=this,e=a.success;return a.success=function(b,c,f){d[a.add?"add":"reset"](d.parse(b,f),a),e&&e(d,b)},a.error=b.wrapError(a.error,d,a),(this.sync||b.sync).call(this,"read",this,a)},create:function(a,b){var d=this,b=b?c.clone(b):{},a=this._prepareModel(a,b);if(!a)return!1;b.wait||d.add(a,b);var e=b.success;return b.success=function(c,f){b.wait&&d.add(c,b),e?e(c,f):c.trigger("sync",a,f,b)},a.save(null,b),a},parse:function(a){return a},chain:function(){return c(this.models).chain()},_reset:function(){this.length=0,this.models=[],this._byId={},this._byCid={}},_prepareModel:function(a,b){return b||(b={}),a instanceof j?a.collection||(a.collection=this):(b.collection=this,a=new this.model(a,b),a._validate(a.attributes,b)||(a=!1)),a},_removeReference:function(a){this==a.collection&&delete a.collection,a.off("all",this._onModelEvent,this)},_onModelEvent:function(a,b,c,d){("add"==a||"remove"==a)&&c!=this||("destroy"==a&&this.remove(b,d),b&&a==="change:"+b.idAttribute&&(delete this._byId[b.previous(b.idAttribute)],this._byId[b.id]=b),this.trigger.apply(this,arguments))}}),c.each("forEach,each,map,reduce,reduceRight,find,detect,filter,select,reject,every,all,some,any,include,contains,invoke,max,min,sortBy,sortedIndex,toArray,size,first,initial,rest,last,without,indexOf,shuffle,lastIndexOf,isEmpty,groupBy".split(","),function(a){k.prototype[a]=function(){return c[a].apply(c,[this.models].concat(c.toArray(arguments)))}});var l=b.Router=function(a){a||(a={}),a.routes&&(this.routes=a.routes),this._bindRoutes(),this.initialize.apply(this,arguments)},m=/:\w+/g,n=/\*\w+/g,o=/[-[\]{}()+?.,\\^$|#\s]/g;c.extend(l.prototype,i,{initialize:function(){},route:function(a,d,e){return b.history||(b.history=new p),c.isRegExp(a)||(a=this._routeToRegExp(a)),e||(e=this[d]),b.history.route(a,c.bind(function(c){c=this._extractParameters(a,c),e&&e.apply(this,c),this.trigger.apply(this,["route:"+d].concat(c)),b.history.trigger("route",this,d,c)},this)),this},navigate:function(a,c){b.history.navigate(a,c)},_bindRoutes:function(){if(this.routes){var a=[],b;for(b in this.routes)a.unshift([b,this.routes[b]]);b=0;for(var c=a.length;b<c;b++)this.route(a[b][0],a[b][1],this[a[b][1]])}},_routeToRegExp:function(a){return a=a.replace(o,"\\$&").replace(m,"([^/]+)").replace(n,"(.*?)"),RegExp("^"+a+"$")},_extractParameters:function(a,b){return a.exec(b).slice(1)}});var p=b.History=function(){this.handlers=[],c.bindAll(this,"checkUrl")},q=/^[#\/]/,r=/msie [\w.]+/;p.started=!1,c.extend(p.prototype,i,{interval:50,getHash:function(a){return(a=(a?a.location:window.location).href.match(/#(.*)$/))?a[1]:""},getFragment:function(a,b){if(null==a)if(this._hasPushState||b){var a=window.location.pathname,c=window.location.search;c&&(a+=c)}else a=this.getHash();return a.indexOf(this.options.root)||(a=a.substr(this.options.root.length)),a.replace(q,"")},start:function(a){if(p.started)throw Error("Backbone.history has already been started");p.started=!0,this.options=c.extend({},{root:"/"},this.options,a),this._wantsHashChange=!1!==this.options.hashChange,this._wantsPushState=!!this.options.pushState,this._hasPushState=!(!this.options.pushState||!window.history||!window.history.pushState);var a=this.getFragment(),b=document.documentMode;if(b=r.exec(navigator.userAgent.toLowerCase())&&(!b||7>=b))this.iframe=d('<iframe src="javascript:0" tabindex="-1" />').hide().appendTo("body")[0].contentWindow,this.navigate(a);this._hasPushState?d(window).bind("popstate",this.checkUrl):this._wantsHashChange&&"onhashchange"in window&&!b?d(window).bind("hashchange",this.checkUrl):this._wantsHashChange&&(this._checkUrlInterval=setInterval(this.checkUrl,this.interval)),this.fragment=a,a=window.location,b=a.pathname==this.options.root;if(this._wantsHashChange&&this._wantsPushState&&!this._hasPushState&&!b)return this.fragment=this.getFragment(null,!0),window.location.replace(this.options.root+"#"+this.fragment),!0;this._wantsPushState&&this._hasPushState&&b&&a.hash&&(this.fragment=this.getHash().replace(q,""),window.history.replaceState({},document.title,a.protocol+"//"+a.host+this.options.root+this.fragment));if(!this.options.silent)return this.loadUrl()},stop:function(){d(window).unbind("popstate",this.checkUrl).unbind("hashchange",this.checkUrl),clearInterval(this._checkUrlInterval),p.started=!1},route:function(a,b){this.handlers.unshift({route:a,callback:b})},checkUrl:function(){var a=this.getFragment();a==this.fragment&&this.iframe&&(a=this.getFragment(this.getHash(this.iframe)));if(a==this.fragment)return!1;this.iframe&&this.navigate(a),this.loadUrl()||this.loadUrl(this.getHash())},loadUrl:function(a){var b=this.fragment=this.getFragment(a);return c.any(this.handlers,function(a){if(a.route.test(b))return a.callback(b),!0})},navigate:function(a,b){if(!p.started)return!1;if(!b||!0===b)b={trigger:b};var c=(a||"").replace(q,"");this.fragment!=c&&(this._hasPushState?(0!=c.indexOf(this.options.root)&&(c=this.options.root+c),this.fragment=c,window.history[b.replace?"replaceState":"pushState"]({},document.title,c)):this._wantsHashChange?(this.fragment=c,this._updateHash(window.location,c,b.replace),this.iframe&&c!=this.getFragment(this.getHash(this.iframe))&&(b.replace||this.iframe.document.open().close(),this._updateHash(this.iframe.location,c,b.replace))):window.location.assign(this.options.root+a),b.trigger&&this.loadUrl(a))},_updateHash:function(a,b,c){c?a.replace(a.toString().replace(/(javascript:|#).*$/,"")+"#"+b):a.hash=b}});var s=b.View=function(a){this.cid=c.uniqueId("view"),this._configure(a||{}),this._ensureElement(),this.initialize.apply(this,arguments),this.delegateEvents()},t=/^(\S+)\s*(.*)$/,u="model,collection,el,id,attributes,className,tagName".split(",");c.extend(s.prototype,i,{tagName:"div",$:function(a){return this.$el.find(a)},initialize:function(){},render:function(){return this},remove:function(){return this.$el.remove(),this},make:function(a,b,c){return a=document.createElement(a),b&&d(a).attr(b),null!=c&&d(a).html(c),a},setElement:function(a,b){return this.$el&&this.undelegateEvents(),this.$el=a instanceof d?a:d(a),this.el=this.$el[0],!1!==b&&this.delegateEvents(),this},delegateEvents:function(a){if(a||(a=y(this,"events"))){this.undelegateEvents();for(var b in a){var d=a[b];c.isFunction(d)||(d=this[a[b]]);if(!d)throw Error('Method "'+a[b]+'" does not exist');var e=b.match(t),f=e[1],e=e[2],d=c.bind(d,this),f=f+(".delegateEvents"+this.cid);""===e?this.$el.bind(f,d):this.$el.delegate(e,f,d)}}},undelegateEvents:function(){this.$el.unbind(".delegateEvents"+this.cid)},_configure:function(a){this.options&&(a=c.extend({},this.options,a));for(var b=0,d=u.length;b<d;b++){var e=u[b];a[e]&&(this[e]=a[e])}this.options=a},_ensureElement:function(){if(this.el)this.setElement(this.el,!1);else{var a=y(this,"attributes")||{};this.id&&(a.id=this.id),this.className&&(a["class"]=this.className),this.setElement(this.make(this.tagName,a),!1)}}}),j.extend=k.extend=l.extend=s.extend=function(a,b){var c=x(this,a,b);return c.extend=this.extend,c};var v={create:"POST",update:"PUT","delete":"DELETE",read:"GET"};b.sync=function(a,e,f){var g=v[a];f||(f={});var h={type:g,dataType:"json"};return f.url||(h.url=y(e,"url")||z()),!f.data&&e&&("create"==a||"update"==a)&&(h.contentType="application/json",h.data=JSON.stringify(e.toJSON())),b.emulateJSON&&(h.contentType="application/x-www-form-urlencoded",h.data=h.data?{model:h.data}:{}),b.emulateHTTP&&("PUT"===g||"DELETE"===g)&&(b.emulateJSON&&(h.data._method=g),h.type="POST",h.beforeSend=function(a){a.setRequestHeader("X-HTTP-Method-Override",g)}),"GET"!==h.type&&!b.emulateJSON&&(h.processData=!1),d.ajax(c.extend(h,f))},b.wrapError=function(a,b,c){return function(d,e){e=d===b?e:d,a?a(b,e,c):b.trigger("error",b,e,c)}};var w=function(){},x=function(a,b,d){var e;return e=b&&b.hasOwnProperty("constructor")?b.constructor:function(){a.apply(this,arguments)},c.extend(e,a),w.prototype=a.prototype,e.prototype=new w,b&&c.extend(e.prototype,b),d&&c.extend(e,d),e.prototype.constructor=e,e.__super__=a.prototype,e},y=function(a,b){return!a||!a[b]?null:c.isFunction(a[b])?a[b]():a[b]},z=function(){throw Error('A "url" property or function must be specified')};return b}),d("ginseng/helpers/inheritance",["underscore"],function(a){var b={inherit:function(b,c,d){function f(){}var e;return c&&c.hasOwnProperty("constructor")?e=c.constructor:e=function(){return b.apply(this,arguments)},a.extend(e,b),f.prototype=b.prototype,e.prototype=new f,c&&a.extend(e.prototype,c),d&&a.extend(e,d),e.prototype.constructor=e,e.prototype.__super__=b.prototype,e},mixin:function(b){return a.extend.apply(null,arguments),b}};return b}),d("ginseng/mixins/extendable",["../helpers/inheritance"],function(a){var b={extend:function(b,c){var d=a.inherit(this,b,c);return d}};return b}),d("ginseng/mixins/mixable",["../helpers/inheritance"],function(a){var b={mixin:function(){var b=Array.prototype.slice.call(arguments);return b=[this].concat(b),a.mixin.apply(null,b)}};return b}),d("ginseng/modular_base",["underscore","backbone","./mixins/extendable","./mixins/mixable"],function(a,b,c,d){var e=function(b){var c,d,f;b||(b={}),this.options=b,this.modules=[],this.loaded=!1,this.cold=!0,this.router&&this.routes&&g.call(this),c=this.load,this.load=function(){a.isFunction(c)&&c.call(this),e.prototype._load.call(this)},d=this.unload,this.unload=function(){e.prototype._unload.call(this),a.isFunction(d)&&d.call(this)},f=this.finalize,this.finalize=function(){e.prototype._finalize.call(this),a.isFunction(f)&&f.call(this)},this.initialize.call(this,b)};a.extend(e.prototype,d,b.Events,{initialize:function(){},_load:function(){this.cold&&(this.router&&i.call(this),this.cold=!1),a.each(a.filter(this.modules,function(a){return a.autoload===!0}),function(a){a.instance.load()}),this.router&&this.router.start(),this.loaded=!0},_unload:function(){a.each(this.modules,function(a){a.instance.loaded&&a.instance.unload()}),this.router&&this.router.stop(),this.loaded=!1},_finalize:function(){a.each(this.modules,function(a){a.instance.loaded&&a.instance.unload(),a.instance.finalize()})},moduleFactory:function(){return null},addModule:function(b,c,d){a.isUndefined(c)&&(c={}),a.isUndefined(d)&&(d=!0);if(!a.isFunction(b))throw new Error("moduleCtor argument must be a constructor");if(!a.isObject(c))throw new Error("moduleOptions argument must be a options object");if(!a.isBoolean(d)&&!a.isString(d))throw new Error("autoload argument must be a boolean or string");if(a.isString(d)&&!this.router)throw new Error(this.toString()+' is not routable and therefore cannot manage routable module at url fragment "'+d+'"');if(a.isString(d)){var e=d;if(!this.router.hasRoute(e))throw new Error("Route with name "+d+" is not defined");var g=this.router.getRoute(e),i=e;this.router.baseRoute&&this.router.baseRouteName&&(g=this.router.baseRoute+"/"+g,i=this.router.baseRouteName+"_"+i),c.baseRoute=g,c.baseRouteName=i}else if(c.baseRoute||c.baseRouteName)delete c.baseRoute,delete c.baseRouteName;var j=this.moduleFactory(b,c),k={ctor:b,instance:j,autoload:d};return this.modules.push(k),f(k)&&h.call(this,k),j},loadModule:function(b){if(b.loaded)return;b.isRoutable()&&a.chain(this.modules).filter(function(a){return f(a)}).each(function(a){a.instance.loaded&&a.instance.unload()}),b.load()},getRoutes:function(){return this.router?a.clone(this.router.routes):[]},hasRoutes:function(){return!a.isEmpty(this.getRoutes())}}),a.extend(e,d,c);var f=function(b){return a.isString(b.autoload)},g=function(){var a=[];for(var b in this.routes)a.unshift([b,this.routes[b]]);for(var c=0,d=a.length;c<d;c++)this.router.route(a[c][0],a[c][1])},h=function(b){var c=b.instance.getRoutes(),d,e;if(a.isEmpty(c))return;d=this.router.getRoute(b.autoload),e=b.autoload,a.each(c,function(a){if(a.route==="")return;var b,c;b=d+"/"+a.route,c=e+"_"+a.name,this.router.hasRoute(c)||this.router.route(b,c,!1)},this)},i=function(){a.each(this.getRoutes(),function(b){var c=a.find(this.modules,function(a){return a.autoload===b.name});c?a.chain(this.getRoutes()).filter(function(a){return a.route.match(new RegExp("^"+b.route+"/"))}).union([b]).each(function(a){this.router.on("route:"+a.name,function(){this.loadModule(c.instance)},this)},this):this[b.name]&&this.router.on("route:"+b.name,this[b.name],this)},this)};return e}),d("ginseng/router",["backbone","underscore"],function(a,b){var c=a.Router.extend({constructor:function(){this.routes=[]},route:function(b,c,d){d=d===undefined?!0:d;if(this.hasRoute(c))throw new Error('route with name "'+c+'" is already defined');return this.routes.push({route:b,name:c}),d&&a.Router.prototype.route.call(this,b,c),this},hasRoute:function(a){return b.any(this.routes,function(b){return b.name===a})},getRoute:function(a){var c=b.find(this.routes,function(b){return b.name===a});return c?c.route:c},start:function(){if(!a.history)return;a.history.start({pushState:!0})},stop:function(){if(!a.history)return;a.history.stop()}});return c}),d("ginseng/sandbox",["underscore","ginseng/mixins/mixable","ginseng/mixins/extendable"],function(a,b,c){var d=function(a){this.core=a};return a.extend(d.prototype,b,{moduleFactory:function(a,b){return this.core.moduleFactory(a,b)},getRouter:function(){return this.core.router}}),a.extend(d,c),d}),d("ginseng/core",["underscore","./modular_base","./router","./sandbox","./mixins/mixable"],function(a,b,c,d,e){var f=b.extend({constructor:function(a){a||(a={}),this.router=new c,this.extensions=[],this.Sandbox=d.extend(),b.call(this,a)},addModule:function(c,d,e){var f,g;return a.isString(e)&&e.indexOf("/")===0&&(f=e.slice(1),g=f.replace(/\//g,"_"),this.router.route(f,g),e=g),b.prototype.addModule.call(this,c,d,e)},moduleFactory:function(a,b){var c=function(){},d,e,f,g;return c.prototype=a.prototype,d=new c,g=this.sandboxFactory(),e=a.call(d,g,b)||d,e},sandboxFactory:function(){return new this.Sandbox(this)},addExtension:function(a){var b=function(){},c;b.prototype=a.prototype,c=new b,c=a.call(c,this)||c,c.Sandbox&&this.Sandbox.prototype.mixin(c.Sandbox),this.extensions.push(c)}});return f}),d("ginseng/extension",["underscore","./mixins/extendable"],function(a,b){var c=function(a){this.core=a,this.initialize.call(this)};return c.extend=b.extend,a.extend(c.prototype,{initialize:function(){}}),c}),d("ginseng/module_router",["underscore","backbone"],function(a,b){var c=function(a){a||(a={}),this._extractOptions(a),this.routes=[]};return a.extend(c.prototype,b.Events,{_extractOptions:function(a){if(!a.router)throw new Error("options argument must have router property");if(!a.baseRoute)throw new Error("options argument must have baseRoute property");if(!a.baseRouteName)throw new Error("options argument must have baseRouteName property");this.router=a.router,this.baseRoute=a.baseRoute,this.baseRouteName=a.baseRouteName},route:function(a,b,c){return c=c===undefined?!0:c,this.routes.push({route:a,name:b}),c&&a&&(a=this.baseRoute+"/"+a,b=this.baseRouteName+"_"+b,this.router.route(a,b)),this},hasRoute:function(b){return a.any(this.routes,function(a){return a.name===b})},getRoute:function(b){var c=a.find(this.routes,function(a){return a.name===b});return c?c.route:c},navigate:function(a,b){a=this.baseRoute+"/"+a,this.router.navigate(a,b)},start:function(){a.each(this.routes,function(a){this.router.on("route:"+this.baseRouteName+"_"+a.name,function(){this.trigger("route:"+a.name)},this)},this),this._loadFragment(this._getCurrentUrlFragment())},stop:function(){this.router.off(null,null,this)},_getCurrentUrlFragment:function(){return b.history.fragment},_loadFragment:function(b){var c=a.any(this.routes,function(a){var c=new RegExp(b+"$"),d=a.route?this.baseRoute+"/"+a.route:this.baseRoute;if(c.test(d))return this.trigger("route:"+a.name),!0},this);return c}}),c}),d("ginseng/module",["underscore","backbone","./modular_base","./module_router"],function(a,b,c,d){var e=c.extend({constructor:function(a,b){b||(b={}),this.sandbox=a,f.call(this,b);if(this.isRoutable())this.router=new d({router:this.sandbox.getRouter(),baseRoute:this.baseRoute,baseRouteName:this.baseRouteName});else if(this.routes)throw new Error("This module is not allowed to have routes");c.call(this,b)},moduleFactory:function(a,b){return this.sandbox.moduleFactory(a,b)},isRoutable:function(){return a.has(this,"baseRoute")&&a.has(this,"baseRouteName")}}),f=function(a){var b=["el","baseRoute","baseRouteName"];for(var c=0,d=b.length;c<d;c++){var e=b[c];a[e]&&(this[e]=a[e])}};return e}),d("ginseng/model",["backbone"],function(a){var b=a.Model.extend();return b}),d("ginseng/view",["backbone"],function(a){var b=a.View.extend();return b}),d("ginseng/collection",["backbone"],function(a){var b=a.Collection.extend();return b}),d("ginseng",["underscore","ginseng/core","ginseng/extension","ginseng/module","ginseng/model","ginseng/view","ginseng/collection"],function(a,b,c,d,e,f,g){var h={_:a,Core:b,Extension:c,Module:d,Model:e,View:f,Collection:g};return h});var e=c("ginseng");a.define?function(a){a(function(){return e})}(a.define):a.Ginseng=e})(this)
+  var exports = {
+    _: Underscore,
+    Core: Core,
+    Extension: Extension,
+    Module: Module,
+    Model: Model,
+    View: View,
+    Collection: Collection
+  };
+
+  return exports;
+
+});
+ var Ginseng = require('ginseng'); if(global.define) {   (function(define) {     define(function() { return Ginseng; });   }(global.define)); } else {   global['Ginseng'] = Ginseng; };}(this));
