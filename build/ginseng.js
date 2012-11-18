@@ -1409,7 +1409,12 @@ define('ginseng/module_router',[
     },
 
     navigate: function(fragment, options) {
-      fragment = this.baseRoute + '/' + fragment;
+      if(fragment === '/' || fragment === '') {
+        fragment = this.baseRoute;
+      } else {
+        fragment = this.baseRoute + '/' + fragment;
+      }
+
       this.router.navigate(fragment, options);
     },
 
@@ -1648,7 +1653,7 @@ define('ginseng/collection',['backbone'], function(Backbone) {
 });
 
 /**
- * ginseng 0.1
+ * ginseng 0.1.1
  * (c) 2012, Julian Maicher (University of Paderborn)
  */
 define('ginseng',[
