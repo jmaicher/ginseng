@@ -171,6 +171,20 @@ require([
           expect(spy).toHaveBeenCalledWith(subject.baseRoute + '/' + fragment, options);
         });
 
+        it('should navigate to baseRoute when given fragment is / or empty string', function() {
+          var spy = spyOn(router, 'navigate'),
+              fragment = '/',
+              options = {};
+
+          // Note: Something like .exactly(2).times() would be useful here
+          // This way we would also get rid of spy.reset()
+          subject.navigate(fragment, options);
+          expect(spy).toHaveBeenCalledWith(subject.baseRoute, options);
+          spy.reset();
+          subject.navigate('', options);
+          expect(spy).toHaveBeenCalledWith(subject.baseRoute, options);
+        });
+
       }); // #navigate
 
 
@@ -185,10 +199,6 @@ require([
 
           // set url fragment by stubbing out getter method
           _getCurrentUrlFragmentSpy = spyOn(subject, '_getCurrentUrlFragment').andReturn('no/matching/url/fragment');
-        });
-
-        afterEach(function() {
-          
         });
 
         it('binds absolute route callbacks to #router for all relative routes which will trigger relative route events', function() {
@@ -257,12 +267,6 @@ require([
         });
 
       }); // #stop
-
-      describe('#loadFragment', function() {
-      
-         
-
-      }); 
 
     }); // prototype
     
