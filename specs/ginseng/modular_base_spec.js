@@ -780,6 +780,15 @@ require([
           expect(spy).toHaveBeenCalled();
         });
 
+        it('passes additional arguments to module#load', function() {
+          var spy = spyOn(module, 'load'),
+              arg1 = 1, arg2 = 2;
+
+          subject.loadModule(module, arg1, arg2);
+
+          expect(spy).toHaveBeenCalledWith(arg1, arg2);
+        });
+
       }); // #loadModule
 
 

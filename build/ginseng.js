@@ -821,8 +821,11 @@ define('ginseng/modular_base',[
      * @instance
      *
      * @param {ginseng/module} moduleInstance - module instance to load
+     * @param [arguments] - additional arguments will be passed to moduleInstance#load
      */
     loadModule: function(moduleInstance) {
+      var args;
+
       if(moduleInstance.loaded) return;
       
       if(moduleInstance.isRoutable()) {
@@ -836,7 +839,9 @@ define('ginseng/modular_base',[
           });
       }
 
-      moduleInstance.load(); 
+      // load module instance with additional arguments if given
+      args = Array.prototype.slice.apply(arguments, [1]);
+      moduleInstance.load.apply(moduleInstance, args); 
     },
 
     /**
