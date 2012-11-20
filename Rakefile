@@ -5,6 +5,8 @@ task :build => :jshint do
   puts "Building ginseng with r.js ...\n\n" 
   # create build with r.js using the build.js config
   sh "node vendor/r.js -o build.js"
+  puts "Building minified version ...\n\n"
+  sh "node vendor/r.js -o build-minified.js"
 end
 
 task :jshint do
