@@ -18,7 +18,7 @@
   name: '../vendor/almond',
 
   // optimize the output with uglify.js
-  optimize: 'uglify',
+  optimize: 'none',
 
   preserveLicenseComments: true,
 

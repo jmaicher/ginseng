@@ -626,8 +626,14 @@ define('ginseng/modular_base',[
     // is called after child function #load when child implements it
     load = this.load;
     this.load = function() {      
-      if(_.isFunction(load))
-        load.call(this);
+      var args;
+
+      if(_.isFunction(load)) {
+        // convert arguments object to array
+        args = Array.prototype.slice.call(arguments);
+        load.apply(this, args);
+      }
+
       exports.prototype._load.call(this);
     };
 
@@ -635,9 +641,15 @@ define('ginseng/modular_base',[
     // is called before child function #unload when child implements it
     unload = this.unload;
     this.unload = function() {
+      var args;
+
       exports.prototype._unload.call(this);
-      if(_.isFunction(unload))
-        unload.call(this);
+
+      if(_.isFunction(unload)) {
+        // convert arguments object to array
+        args = Array.prototype.slice.call(arguments);
+        unload.apply(this, args);
+      }
     };
 
     // define/overwrite #finalize and ensure that prototype function #_finalize
@@ -1653,7 +1665,7 @@ define('ginseng/collection',['backbone'], function(Backbone) {
 });
 
 /**
- * ginseng 0.1.1
+ * ginseng 0.1.2
  * (c) 2012, Julian Maicher (University of Paderborn)
  */
 define('ginseng',[
