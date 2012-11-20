@@ -241,6 +241,25 @@ require([
 
               });
 
+              describe('when also a function with the route name is defined', function() {
+              
+                beforeEach(function() {
+                  subject[routeName] = function() {};
+                });
+
+                it('invokes the function and does not create a callback function which autoloads the module', function() {
+                  var loadModuleSpy = spyOn(subject, 'loadModule'),
+                      routeCallbackSpy = spyOn(subject, routeName);
+
+                  subject._load();
+                  subject.router.trigger('route:' + routeName);
+
+                  expect(routeCallbackSpy).toHaveBeenCalled();
+                  expect(loadModuleSpy).not.toHaveBeenCalled();
+                }); 
+              
+              });
+
               it('creates callback for the route event which loads the module', function() {
                 var spy = spyOn(subject, 'loadModule');
 
