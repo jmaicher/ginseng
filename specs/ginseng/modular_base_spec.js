@@ -80,6 +80,18 @@ require([
         expect(childProtoSpy).toHaveBeenCalled();
       });
 
+      it('ensures that arguments are forwared to custom #load function', function() {
+        var arg = "Hello world",
+          Child = ModularBase.extend({
+            load: function(arg) {}
+          }),
+          loadSpy = spyOn(Child.prototype, 'load');
+
+        new Child().load(arg);
+
+        expect(loadSpy).toHaveBeenCalledWith(arg);
+      });
+
       it('defines/redefines #unload function which ensures that prototype function #_unload and child function #unload are both called when child implements it', function() {
         var protoSpy = spyOn(ModularBase.prototype, '_unload'),
             Child = ModularBase.extend({
@@ -91,6 +103,18 @@ require([
 
         expect(protoSpy).toHaveBeenCalled();
         expect(childProtoSpy).toHaveBeenCalled();
+      });
+
+      it('ensures that arguments are forwared to custom #unload function', function() {
+        var arg = "Hello world",
+          Child = ModularBase.extend({
+            unload: function(arg) {}
+          }),
+          unloadSpy = spyOn(Child.prototype, 'unload');
+
+        new Child().unload(arg);
+
+        expect(unloadSpy).toHaveBeenCalledWith(arg);
       });
 
       it('defines/redefines #finalize function which ensures that prototype function #_finalize and child function #finalize are both called when child implements it', function() {
@@ -105,7 +129,6 @@ require([
         expect(protoSpy).toHaveBeenCalled();
         expect(childProtoSpy).toHaveBeenCalled();
       });
-
 
       it('invokes #initialize with given arguments', function() {
         var spy = spyOn(ModularBase.prototype, 'initialize');
