@@ -972,9 +972,15 @@ define('ginseng/modular_base',[
           .union([route])
           .each(function(_route) {
 
-            this.router.on('route:' + _route.name, function() {
-              this.loadModule(module.instance);
-            }, this);
+            // when function with route name is defined in module => call it
+            // else: create callback function which autoloads the module
+            if(_.isFunction(this[_route.name])) {
+              this.router.on('route:' + _route.name, this[_route.name], this);
+            } else {
+              this.router.on('route:' + _route.name, function() {
+                  this.loadModule(module.instance);
+              }, this);
+            }
 
           }, this);
 
@@ -1665,7 +1671,7 @@ define('ginseng/collection',['backbone'], function(Backbone) {
 });
 
 /**
- * ginseng 0.1.2
+ * ginseng 0.1.3
  * (c) 2012, Julian Maicher (University of Paderborn)
  */
 define('ginseng',[
